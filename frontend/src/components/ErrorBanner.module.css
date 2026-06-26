@@ -1,0 +1,35 @@
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.banner p {
+  font-size: 0.9rem;
+  margin-top: 0.25rem;
+}
+
+.retry {
+  align-self: flex-start;
+  background: #991b1b;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+@media (min-width: 480px) {
+  .banner {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+}

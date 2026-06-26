@@ -1,0 +1,10 @@
+.chart {
+  width: 100%;
+  min-height: 280px;
+}
+
+.empty {
+  color: #5a6270;
+  padding: 2rem 0;
+  text-align: center;
+}

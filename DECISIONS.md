@@ -1,0 +1,321 @@
+# DECISIONS.md
+
+Engineering decisions for the Rate Tracker assessment.
+
+---
+
+## Assumptions
+
+### 1. Seed file simulates scraped data
+
+The parquet file includes `source_url` and `raw_response_id` fields as if data were fetched over HTTP. The `seed_data` command loads from parquet; the scraper module handles live HTTP for webhook-style ingestion and is tested with mocked responses.
+
+**Example — a row in the seed file looks like a scrape result:**
+
+```json
+{
+  "provider": "Chase",
+  "rate_type": "5yr_arm_mortgage",
+  "rate_value": 6.608,
+  "source_url": "https://www.chase.com/rates/5yr_arm_mortgage",
+  "raw_response_id": "b86e6b3a-ce03-4e8b-a342-2906a00b119e"
+}
+```
+
+**How the app uses this:**
+
+| Path | What it does |
+|------|--------------|
+| `python manage.py seed_data` | Reads parquet in bulk (assessment requirement) |
+| `rates/services/scraper.py` | Handles real HTTP (timeouts, 503 errors) for webhooks/live ingestion |
+| pytest (`test_scraper.py`) | Mocks HTTP and verifies parsed output matches a known fixture |
+
+In production, live URLs would be scraped on a schedule. For the assessment, parquet is the stand-in dataset with the same shape.
+
+---
+
+### 2. Provider names should be canonicalized at ingestion
+
+The seed contains casing variants (`hsbc`, `Hsbc`, `HSBC`). I normalize to a canonical display name at ingestion time rather than at query time, so API responses are consistent.
+
+**Example — seed input:**
+
+```
+Row 1:  provider = "hsbc"
+Row 2:  provider = "Hsbc"
+Row 3:  provider = "HSBC"
+```
+
+**After `normalize_provider_name()`:**
+
+```
+All three → name: "HSBC", normalized_name: "hsbc"  (single Provider row)
+```
+
+**API response always shows:**
+
+```json
+{ "provider": "HSBC", "rate_type": "savings_1yr_fixed", "rate_value": "4.7647" }
+```
+
+**Alternative rejected:** normalize in every SQL query (`LOWER(provider)`). That is slower, error-prone, and inconsistent across endpoints.
+
+---
+
+### 3. Duplicate business keys keep the latest observation
+
+~97% of rows share `(provider, rate_type, effective_date)`. I deduplicate during parquet batch loading (keep latest `ingestion_ts`) and use `external_id` uniqueness for idempotent re-runs.
+
+**Example — three parquet rows with the same business key:**
+
+| provider | rate_type | effective_date | ingestion_ts | rate_value |
+|----------|-----------|----------------|--------------|------------|
+| Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 08:00 | 6.50 |
+| Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 14:30 | 6.55 |
+| Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48 |
+
+**During batch load:**
+
+```python
+df.sort_values("ingestion_ts").drop_duplicates(
+    subset=["provider", "rate_type", "effective_date"],
+    keep="last",
+)
+```
+
+**Only this row is inserted:**
+
+```
+Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48
+```
+
+~972K of ~1M seed rows are duplicates on this business key. Loading all would bloat the DB without adding information. `external_id` uniqueness separately prevents re-inserting the same raw payload on re-run.
+
+---
+
+### 4. Invalid rates are stored as partial records
+
+Rows with null or non-positive `rate_value` are persisted with `parse_status=partial` and `rate_value=NULL`, excluded from API read endpoints. This supports replay without data loss.
+
+**Example — seed row with null rate:**
+
+```json
+{
+  "provider": "Chase",
+  "rate_type": "30yr_fixed_mortgage",
+  "rate_value": null,
+  "effective_date": "2025-03-01",
+  "raw_response_id": "bad-001"
+}
+```
+
+**What gets stored:**
+
+```
+rates_rawresponse:  parse_status = "partial", error_message = "Invalid or missing rate_value"
+rates_rate:         rate_value = NULL  (linked to raw response)
+```
+
+**What the API returns:**
+
+```
+GET /api/rates/latest  → this row is EXCLUDED (WHERE rate_value IS NOT NULL)
+```
+
+The raw payload is preserved so an engineer can inspect `raw_body`, fix the parser, and replay `bad-001` without re-scraping. There are ~215 such rows in the seed (200 null + 15 non-positive).
+
+---
+
+### 5. Celery Beat re-processes the seed file on schedule
+
+In production this would call live provider URLs; for the assessment, scheduled ingestion re-runs parquet loading idempotently to demonstrate the scheduler wiring.
+
+**Example — every 15 minutes:**
+
+```
+Celery Beat triggers → run_scheduled_ingestion task
+                     → reads /data/rates_seed.parquet
+                     → skips existing external_id values (idempotent)
+```
+
+**Example log output on second run:**
+
+```json
+{"event": "scheduled_ingestion_end", "inserted_rates": 0, "skipped_duplicates": 32930}
+```
+
+**In production this would be:**
+
+```
+Celery Beat → fetch https://chase.com/rates → parse → store
+```
+
+Using parquet for the demo avoids dependency on external sites being up during review.
+
+---
+
+## Idempotency Strategy
+
+The seed file has four categories of duplication/quality issues:
+
+| Issue | Count (approx.) | Handling |
+|-------|-----------------|----------|
+| Duplicate `(provider, rate_type, effective_date)` | ~972K | Pre-dedupe per batch: sort by `ingestion_ts`, keep last |
+| Duplicate `raw_response_id` | 0 | `external_id` UNIQUE + `get_or_create` / `ignore_conflicts` on bulk insert |
+| Invalid `rate_value` (null or ≤0) | 215 | Store as `partial` raw response; skip from read APIs |
+| Provider casing variants | 3 variants of HSBC | `normalized_name` lookup table at ingestion |
+
+### Example — re-run safety for `seed_data`
+
+```
+Run 1: external_id "abc-123" → inserted  (inserted_rates += 1)
+Run 2: external_id "abc-123" → skipped   (skipped_duplicates += 1)
+```
+
+Running `python manage.py seed_data` multiple times does not create duplicate rates.
+
+### Example — webhook idempotency
+
+```bash
+# First call
+curl -X POST http://localhost:8000/api/rates/ingest \
+  -H "Authorization: Bearer $INGEST_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "Chase",
+    "rate_type": "30yr_fixed_mortgage",
+    "rate_value": "6.75",
+    "effective_date": "2025-06-01",
+    "raw_response_id": "webhook-001"
+  }'
+# → 201 Created
+
+# Same payload again
+# → 200 { "message": "Duplicate record — idempotent no-op", "status": "duplicate" }
+```
+
+### How schema and idempotency connect
+
+```
+Parquet row: { provider: "hsbc", rate_value: null, raw_response_id: "x1" }
+  ├─ Assumption 2: canonicalize → Provider(name="HSBC")
+  ├─ Assumption 4: partial record → RawResponse(parse_status="partial")
+  ├─ Schema: rates_rate.rate_value = NULL
+  └─ API: excluded from /latest, but preserved for replay
+
+Parquet row: { provider: "Chase", same business key, older ingestion_ts }
+  ├─ Assumption 3: dedupe batch → dropped (newer row kept)
+  └─ Schema: composite unique allows different ingestion_ts if both were kept
+
+Re-run seed_data
+  ├─ Idempotency: external_id UNIQUE → 0 new rows
+  └─ Stats: skipped_duplicates = total existing count
+```
+
+---
+
+## Conscious Tradeoff: Celery Beat over cron
+
+**Chose Celery Beat** over a host-level cron job.
+
+### What we chose
+
+```
+docker-compose.yml:
+  celery-worker   → executes tasks
+  celery-beat     → schedules every 15 min
+  redis           → message broker (shared with cache)
+```
+
+**Example scheduled run (first time after seed):**
+
+```json
+{"event": "scheduled_ingestion_start", "job_id": "abc...", "path": "/data/rates_seed.parquet"}
+{"event": "scheduled_ingestion_end", "inserted_rates": 0, "skipped_duplicates": 32930}
+```
+
+### Alternative: cron inside the container
+
+```cron
+*/15 * * * * python manage.py seed_data
+```
+
+| | Celery Beat | cron |
+|---|-------------|------|
+| Retry on failure | ✅ automatic (max 3 retries) | ❌ manual |
+| Structured JSON logging | ✅ built-in | ❌ separate setup |
+| Scales to N workers | ✅ | ❌ one job at a time |
+| Extra containers | ❌ worker + beat | ✅ none |
+| Docker-native | ✅ no host cron needed | ⚠️ requires cron in image |
+
+- **Why Celery:** Keeps scheduling inside Docker Compose with no host dependencies; shares Redis broker with cache; retries and structured logging come free.
+- **Why not cron:** Simpler for a toy project, but lacks visibility, retry semantics, and doesn't scale to multiple workers.
+- **Constraint:** 48-hour window — Celery adds containers but matches how Marketplace-style systems run background jobs.
+
+---
+
+## One Thing I'd Change With More Time
+
+### Primary: materialized view or denormalized `latest_rates` table
+
+**Current approach:**
+
+`GET /api/rates/latest` on cache miss runs:
+
+```sql
+DISTINCT ON (provider_id, rate_type) ...
+ORDER BY effective_date DESC, ingestion_ts DESC
+```
+
+Across ~30K deduplicated rows, with Redis cache (60s TTL).
+
+**Example under load:**
+
+```
+1000 requests/min, cache expires every 60s
+→ ~17 expensive DB queries/sec on cache miss path
+```
+
+**Proposed improvement:**
+
+```
+latest_rates table (denormalized, refreshed on every ingest):
+
+┌──────────┬─────────────────────┬────────────┬──────────────┐
+│ provider │ rate_type           │ rate_value │ updated_at   │
+├──────────┼─────────────────────┼────────────┼──────────────┤
+│ Chase    │ 30yr_fixed_mortgage │ 6.75       │ 2025-06-01   │
+│ HSBC     │ savings_1yr_fixed   │ 4.76       │ 2025-01-12   │
+└──────────┴─────────────────────┴────────────┴──────────────┘
+
+Refreshed via Celery signal after each ingest
+→ GET /latest becomes SELECT * FROM latest_rates  (O(1) per row)
+→ cache invalidation simplifies to a single table refresh
+```
+
+### Secondary: WebSocket push instead of 60-second polling
+
+**Current frontend behavior:**
+
+```
+Every 60 seconds → fetch /api/rates/latest
+(even when nothing has changed)
+```
+
+**Example waste:**
+
+```
+Dashboard open for 1 hour = 60 API calls
+Only 1 ingest event occurred = 59 unnecessary calls
+```
+
+**Proposed improvement:**
+
+```
+POST /api/rates/ingest succeeds
+  → server pushes WebSocket event: { "event": "rates_updated" }
+  → dashboard refreshes immediately
+  → no polling when idle
+```
+
+This would reduce API load and give true real-time updates when ingest webhooks fire.

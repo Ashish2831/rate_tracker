@@ -1,0 +1,90 @@
+.main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+}
+
+.header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.subtitle {
+  color: #5a6270;
+  font-size: 0.95rem;
+}
+
+.meta {
+  font-size: 0.85rem;
+  color: #5a6270;
+}
+
+.filters {
+  margin-bottom: 1rem;
+}
+
+.filters label,
+.chartControls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #3d4450;
+}
+
+.filters select,
+.chartControls select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d5dae1;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.card h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.chartControls {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+@media (min-width: 480px) {
+  .chartControls {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 375px) {
+  .main {
+    padding: 1rem;
+  }
+}

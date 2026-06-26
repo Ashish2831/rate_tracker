@@ -1,0 +1,9 @@
+{
+  "provider": "Chase",
+  "rate_type": "30yr_fixed_mortgage",
+  "rate_value": 6.75,
+  "effective_date": "2025-06-01",
+  "ingestion_ts": "2025-06-01T12:00:00Z",
+  "currency": "USD",
+  "raw_response_id": "test-response-001"
+}

@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --reload
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build:
+      context: ./backend
+    command: celery -A config worker --loglevel=info
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: ./backend
+    command: celery -A config beat --loglevel=info
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - ./data:/data
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
