@@ -1,6 +1,8 @@
+"""Django admin registrations for debugging and data inspection."""
+
 from django.contrib import admin
 
-from .models import Provider, Rate, RawResponse
+from rates.models import Provider, Rate, RawResponse
 
 
 @admin.register(Provider)

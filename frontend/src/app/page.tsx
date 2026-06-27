@@ -1,24 +1,29 @@
+/**
+ * Dashboard page — composes hooks and presentational components only.
+ * Default provider/type selection happens via useEffect when data loads.
+ */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { RateChart } from "@/components/RateChart";
 import { RateTable } from "@/components/RateTable";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { LoadingState } from "@/components/LoadingState";
-import { useDefaultProvider } from "@/hooks/useDefaultProvider";
 import { useLatestRates } from "@/hooks/useLatestRates";
 import { useRateHistory } from "@/hooks/useRateHistory";
 import { useSortableRates } from "@/hooks/useSortableRates";
-import { RATE_TYPES } from "@/lib/api";
+import { formatRateType } from "@/lib/format";
 import styles from "./page.module.css";
 
 export default function DashboardPage() {
   const [typeFilter, setTypeFilter] = useState("");
-  const [selectedType, setSelectedType] = useState<string>(RATE_TYPES[0]);
+  const [selectedType, setSelectedType] = useState("");
+  const [selectedProvider, setSelectedProvider] = useState("");
 
-  const { rates, providers, loading, error, lastUpdated, refresh } = useLatestRates({ typeFilter });
-  const [selectedProvider, setSelectedProvider] = useDefaultProvider(providers);
+  const { rates, providers, rateTypes, loading, error, lastUpdated, refresh } = useLatestRates({
+    typeFilter,
+  });
   const { sortedRates, sortKey, sortDir, toggleSort } = useSortableRates(rates);
   const {
     history,
@@ -26,6 +31,19 @@ export default function DashboardPage() {
     error: historyError,
     refresh: refreshHistory,
   } = useRateHistory({ provider: selectedProvider, rateType: selectedType });
+
+  // Auto-select first provider/type once latest rates load.
+  useEffect(() => {
+    if (!selectedProvider && providers.length > 0) {
+      setSelectedProvider(providers[0]);
+    }
+  }, [providers, selectedProvider]);
+
+  useEffect(() => {
+    if (!selectedType && rateTypes.length > 0) {
+      setSelectedType(rateTypes[0]);
+    }
+  }, [rateTypes, selectedType]);
 
   return (
     <main className={styles.main}>
@@ -44,9 +62,9 @@ export default function DashboardPage() {
           Filter by type
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
             <option value="">All types</option>
-            {RATE_TYPES.map((t) => (
+            {rateTypes.map((t) => (
               <option key={t} value={t}>
-                {t.replace(/_/g, " ")}
+                {formatRateType(t)}
               </option>
             ))}
           </select>
@@ -80,9 +98,9 @@ export default function DashboardPage() {
           <label>
             Rate type
             <select value={selectedType} onChange={(e) => setSelectedType(e.target.value)}>
-              {RATE_TYPES.map((t) => (
+              {rateTypes.map((t) => (
                 <option key={t} value={t}>
-                  {t.replace(/_/g, " ")}
+                  {formatRateType(t)}
                 </option>
               ))}
             </select>

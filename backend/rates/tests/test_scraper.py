@@ -1,9 +1,11 @@
+"""Unit tests for HTTP scrape transport and payload parsing."""
+
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from rates.services.adapters.http import parse_http_payload
+from rates.services.parser import parse_scrape_payload
 from rates.services.scraper import fetch_rate_source
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -22,18 +24,18 @@ def sample_http_response():
     }
 
 
-def test_parse_http_payload_matches_fixture(sample_http_response):
+def test_parse_scrape_payload_matches_fixture(sample_http_response):
     payload = {
         "source_url": "https://www.chase.com/rates/30yr_fixed_mortgage",
         "body": sample_http_response,
     }
-    parsed = parse_http_payload(payload)
+    parsed = parse_scrape_payload(payload)
 
     assert parsed is not None
-    assert parsed["provider_name"] == "Chase"
-    assert parsed["rate_type"] == "30yr_fixed_mortgage"
-    assert parsed["rate_value"] == Decimal("6.75")
-    assert parsed["external_id"] == "test-response-001"
+    assert parsed.provider_name == "Chase"
+    assert parsed.rate_type == "30yr_fixed_mortgage"
+    assert parsed.rate_value == Decimal("6.75")
+    assert parsed.external_id == "test-response-001"
 
 
 def test_fetch_rate_source_success(mocker, sample_http_response):

@@ -1,4 +1,6 @@
-export interface LatestRate {
+/** Shared domain types matching backend API JSON shapes. */
+
+export interface Rate {
   provider: string;
   rate_type: string;
   rate_value: string | number | null;
@@ -6,21 +8,14 @@ export interface LatestRate {
   ingestion_ts: string;
   currency: string;
 }
+
+export type LatestRate = Rate;
+export type HistoryRate = Rate & { id: number };
 
 export interface LatestRatesResponse {
   count: number;
   results: LatestRate[];
   cached: boolean;
-}
-
-export interface HistoryRate {
-  id: number;
-  provider: string;
-  rate_type: string;
-  rate_value: string | number | null;
-  effective_date: string;
-  ingestion_ts: string;
-  currency: string;
 }
 
 export interface HistoryResponse {
@@ -30,7 +25,20 @@ export interface HistoryResponse {
   results: HistoryRate[];
 }
 
+/** Chart-friendly point after filtering null rate values. */
 export interface HistoryPoint {
   effective_date: string;
   rate_value: number;
 }
+
+export type SortKey = "rate_value" | "ingestion_ts" | "provider";
+export type SortDir = "asc" | "desc";
+
+/** Shown in dropdowns before seed data loads. */
+export const FALLBACK_RATE_TYPES = [
+  "30yr_fixed_mortgage",
+  "15yr_fixed_mortgage",
+  "5yr_arm_mortgage",
+  "savings_easy_access",
+  "savings_1yr_fixed",
+] as const;

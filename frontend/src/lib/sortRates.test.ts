@@ -1,7 +1,10 @@
+/** Unit tests for pure sort/rates utilities (no React render). */
+
 import { describe, expect, it } from "vitest";
 
 import { LatestRate } from "@/interfaces/rates";
-import { nextSortState, sortRates, uniqueProviders } from "@/lib/sortRates";
+import { nextSortState, sortRates } from "@/lib/sortRates";
+import { uniqueProviders } from "@/lib/rates";
 
 const sampleRates: LatestRate[] = [
   {

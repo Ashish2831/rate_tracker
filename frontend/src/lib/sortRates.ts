@@ -1,5 +1,6 @@
-import { LatestRate } from "@/interfaces/rates";
-import { SortDir, SortKey } from "@/interfaces/sort";
+/** Pure sort utilities — testable without React (Vitest). */
+
+import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
 
 function compareValues(aVal: string | number, bVal: string | number, sortDir: SortDir): number {
   if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
@@ -14,15 +15,13 @@ function resolveSortValue(rate: LatestRate, sortKey: SortKey): string | number {
   return rate[sortKey] as string | number;
 }
 
-/** Pure sort function — SRP: table sorting logic isolated from UI. */
 export function sortRates(rates: LatestRate[], sortKey: SortKey, sortDir: SortDir): LatestRate[] {
-  return [...rates].sort((a, b) => {
-    const aVal = resolveSortValue(a, sortKey);
-    const bVal = resolveSortValue(b, sortKey);
-    return compareValues(aVal, bVal, sortDir);
-  });
+  return [...rates].sort((a, b) =>
+    compareValues(resolveSortValue(a, sortKey), resolveSortValue(b, sortKey), sortDir)
+  );
 }
 
+/** Toggle direction when clicking the same column; reset to asc on new column. */
 export function nextSortState(
   currentKey: SortKey,
   currentDir: SortDir,
@@ -32,8 +31,4 @@ export function nextSortState(
     return { sortKey: clickedKey, sortDir: currentDir === "asc" ? "desc" : "asc" };
   }
   return { sortKey: clickedKey, sortDir: "asc" };
-}
-
-export function uniqueProviders(rates: LatestRate[]): string[] {
-  return Array.from(new Set(rates.map((rate) => rate.provider))).sort();
 }

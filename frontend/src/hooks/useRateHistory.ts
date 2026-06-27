@@ -1,10 +1,15 @@
+/**
+ * Fetches paginated rate history for chart display.
+ * Drops null rate_value rows (partial records from backend).
+ */
+
 import { useCallback, useEffect, useState } from "react";
 
 import { UseRateHistoryOptions, UseRateHistoryResult } from "@/interfaces/hooks";
 import { HistoryPoint } from "@/interfaces/rates";
 import { RatesApiClient } from "@/interfaces/ratesApiClient";
-import { ApiError } from "@/lib/api";
-import { ratesApiClient } from "@/lib/ratesApiClient";
+import { getErrorMessage } from "@/lib/errors";
+import { ratesApiClient } from "@/lib/api";
 
 function toHistoryPoints(
   results: Awaited<ReturnType<RatesApiClient["fetchRateHistory"]>>["results"]
@@ -17,7 +22,6 @@ function toHistoryPoints(
     }));
 }
 
-/** SRP — owns history fetch and loading/error state for the chart. */
 export function useRateHistory({
   provider,
   rateType,
@@ -32,15 +36,13 @@ export function useRateHistory({
       setHistory([]);
       return;
     }
-
     setLoading(true);
     setError(null);
     try {
       const data = await client.fetchRateHistory(provider, rateType);
       setHistory(toHistoryPoints(data.results));
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load rate history.";
-      setError(message);
+      setError(getErrorMessage(err, "Failed to load rate history."));
       setHistory([]);
     } finally {
       setLoading(false);

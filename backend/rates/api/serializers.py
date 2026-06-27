@@ -1,6 +1,18 @@
+"""DRF serializers — shared field lists for latest and history responses."""
+
 from rest_framework import serializers
 
 from rates.models import Rate
+
+# Single source of truth for latest-rate JSON shape across serializers.
+LATEST_RATE_FIELDS = [
+    "provider",
+    "rate_type",
+    "rate_value",
+    "effective_date",
+    "ingestion_ts",
+    "currency",
+]
 
 
 class RateSerializer(serializers.ModelSerializer):
@@ -8,27 +20,20 @@ class RateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Rate
-        fields = [
-            "id",
-            "provider",
-            "rate_type",
-            "rate_value",
-            "effective_date",
-            "ingestion_ts",
-            "currency",
-        ]
+        fields = ["id", *LATEST_RATE_FIELDS]
 
 
-class LatestRateSerializer(serializers.Serializer):
-    provider = serializers.CharField()
-    rate_type = serializers.CharField()
-    rate_value = serializers.DecimalField(max_digits=8, decimal_places=4, allow_null=True)
-    effective_date = serializers.DateField()
-    ingestion_ts = serializers.DateTimeField()
-    currency = serializers.CharField()
+class LatestRateSerializer(serializers.ModelSerializer):
+    provider = serializers.CharField(source="provider.name", read_only=True)
+
+    class Meta:
+        model = Rate
+        fields = LATEST_RATE_FIELDS
 
 
 class IngestRateSerializer(serializers.Serializer):
+    """Validates webhook payloads before parser.ingest_from_api_payload()."""
+
     provider = serializers.CharField(max_length=128)
     rate_type = serializers.CharField(max_length=64)
     rate_value = serializers.DecimalField(max_digits=8, decimal_places=4)

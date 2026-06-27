@@ -1,4 +1,10 @@
+/**
+ * Backend API client — fetch helpers and injectable RatesApiClient (DIP).
+ * Uses cache: "no-store" so auto-refresh always gets fresh data.
+ */
+
 import { HistoryResponse, LatestRatesResponse } from "@/interfaces/rates";
+import { RatesApiClient } from "@/interfaces/ratesApiClient";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -38,10 +44,8 @@ export function fetchRateHistory(
   return fetchJson<HistoryResponse>(`/rates/history?${params.toString()}`);
 }
 
-export const RATE_TYPES = [
-  "30yr_fixed_mortgage",
-  "15yr_fixed_mortgage",
-  "5yr_arm_mortgage",
-  "savings_easy_access",
-  "savings_1yr_fixed",
-];
+/** Default client injected into hooks; swap in tests. */
+export const ratesApiClient: RatesApiClient = {
+  fetchLatestRates,
+  fetchRateHistory,
+};

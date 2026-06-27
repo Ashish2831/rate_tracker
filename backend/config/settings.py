@@ -1,5 +1,5 @@
-import json
-import logging
+"""Django project settings — Postgres, Redis cache, Celery, structured JSON logging."""
+
 import os
 import sys
 from pathlib import Path
@@ -15,6 +15,7 @@ class EnvError(RuntimeError):
 
 
 def require_env(name: str) -> str:
+    """Fail fast at startup when required config is missing."""
     value = os.getenv(name)
     if not value:
         raise EnvError(
@@ -138,6 +139,7 @@ SEED_PARQUET_PATH = os.getenv(
 )
 SLOW_QUERY_THRESHOLD_MS = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "200"))
 
+# Celery shares Redis with Django cache (see docker-compose.yml).
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_TASK_TRACK_STARTED = True

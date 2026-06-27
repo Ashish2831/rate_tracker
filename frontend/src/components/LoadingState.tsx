@@ -1,3 +1,5 @@
+/** Accessible loading spinner for async data sections. */
+
 import styles from "./LoadingState.module.css";
 
 interface Props {

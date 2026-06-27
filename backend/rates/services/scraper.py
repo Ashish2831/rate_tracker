@@ -1,3 +1,5 @@
+"""HTTP transport for live rate-source URLs (tested; not wired to scheduled ingest)."""
+
 import logging
 from typing import Any
 
@@ -7,7 +9,7 @@ from requests.exceptions import RequestException, Timeout
 
 logger = logging.getLogger("rates.scraper")
 
-DEFAULT_TIMEOUT = (5, 30)
+DEFAULT_TIMEOUT = (5, 30)  # (connect, read) seconds
 
 
 class ScraperError(Exception):
@@ -49,6 +51,7 @@ def fetch_rate_source(url: str, session: requests.Session | None = None) -> dict
         except ValueError as exc:
             raise ScraperError(f"Invalid JSON from {url}") from exc
     else:
+        # Non-JSON responses are truncated and stored as raw text for inspection.
         body = {"raw_text": response.text[:10000]}
 
     return {

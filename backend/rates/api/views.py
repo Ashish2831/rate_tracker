@@ -1,3 +1,5 @@
+"""DRF views for latest rates, history, and authenticated webhook ingest."""
+
 import logging
 
 from django.utils import timezone
@@ -23,11 +25,17 @@ class HistoryPagination(PageNumberPagination):
     max_page_size = 200
 
 
-class LatestRatesView(APIView):
-    service_class = LatestRatesCacheService
+class ServiceAPIView(APIView):
+    """Base view — delegates business logic to an injectable service class."""
 
-    def get_service(self) -> LatestRatesCacheService:
+    service_class = None
+
+    def get_service(self):
         return self.service_class()
+
+
+class LatestRatesView(ServiceAPIView):
+    service_class = LatestRatesCacheService
 
     def get(self, request):
         rate_type = request.query_params.get("type")
@@ -35,12 +43,9 @@ class LatestRatesView(APIView):
         return Response({"count": len(data), "results": data, "cached": cached})
 
 
-class RateHistoryView(APIView):
+class RateHistoryView(ServiceAPIView):
     pagination_class = HistoryPagination
     service_class = RateHistoryService
-
-    def get_service(self) -> RateHistoryService:
-        return self.service_class()
 
     def get(self, request):
         provider = request.query_params.get("provider")
@@ -59,32 +64,30 @@ class RateHistoryView(APIView):
             date_to=request.query_params.get("to"),
         )
 
-        paginator = HistoryPagination()
+        paginator = self.pagination_class()
         page = paginator.paginate_queryset(queryset, request)
-        serializer = RateSerializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
+        return paginator.get_paginated_response(RateSerializer(page, many=True).data)
 
 
-class IngestRateView(APIView):
+class IngestRateView(ServiceAPIView):
+    """Bearer-authenticated webhook for single-record ingest."""
+
     authentication_classes = [BearerTokenAuthentication]
     permission_classes = [HasBearerToken]
     service_class = IngestionService
-
-    def get_service(self) -> IngestionService:
-        return self.service_class()
 
     def post(self, request):
         serializer = IngestRateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response({"errors": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        payload = serializer.validated_data
-        if "ingestion_ts" not in payload:
-            payload["ingestion_ts"] = timezone.now()
+        payload = dict(serializer.validated_data)
+        payload.setdefault("ingestion_ts", timezone.now())
 
         try:
             rate = self.get_service().ingest_from_api_payload(payload)
         except DuplicateRateError as exc:
+            # Idempotent re-post returns 200, not an error.
             return Response({"message": str(exc), "status": "duplicate"}, status=status.HTTP_200_OK)
         except InvalidIngestPayloadError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

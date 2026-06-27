@@ -61,10 +61,20 @@ python manage.py seed_data  # inside backend container
 
 ### Run tests
 
+Requires the stack running (`make up`). Runs backend pytest (including API integration tests against Postgres/Redis) and frontend Vitest:
+
 ```bash
 make test
-# or
-docker compose exec backend pytest
+# or individually:
+make test-backend
+make test-frontend
+```
+
+Without Docker, unit tests only (11 backend + 5 frontend — API tests need Postgres):
+
+```bash
+cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py
+cd frontend && npm test
 ```
 
 ### Tail logs
@@ -82,7 +92,9 @@ make logs
 | `make up` | Build and start all containers |
 | `make down` | Stop containers |
 | `make seed` | Load parquet seed data |
-| `make test` | Run backend pytest suite |
+| `make test` | Run backend pytest + frontend Vitest |
+| `make test-backend` | Backend pytest only (in Docker) |
+| `make test-frontend` | Frontend Vitest only (in Docker) |
 | `make migrate` | Run Django migrations |
 | `make logs` | Follow container logs |
 
@@ -140,7 +152,9 @@ API Views (HTTP only)
 
 RateWriter (persist)  →  ProviderResolver + ORM
 ParquetRateSource     →  implements RateRecordSource (Open/Closed)
-adapters/http.py      →  HTTP response → parsed record (Adapter)
+create_rate_source()  →  Factory Method for source selection
+parsed_rate.py        →  ParsedRate value object (parser → writer)
+parser.py             →  parse_scrape_payload() maps HTTP body → record (Adapter)
 ```
 
 ### Frontend
@@ -149,13 +163,15 @@ adapters/http.py      →  HTTP response → parsed record (Adapter)
 page.tsx (composition only)
     ├── useLatestRates      → fetch + auto-refresh + loading/error (SRP)
     ├── useRateHistory      → chart data fetch (SRP)
-    ├── useSortableRates    → sort state → sortRates() pure fn (SRP)
-    └── useDefaultProvider  → initial provider selection
+    └── useSortableRates    → sort state → sortRates() pure fn (SRP)
 
-lib/ratesApiClient.ts   → default RatesApiClient implementation (DIP)
-lib/sortRates.ts        → pure sort/order utilities (testable without React)
-interfaces/             → all shared types & interfaces (rates, sort, hooks, api client)
-components/             → presentational UI only (RateTable, RateChart, ErrorBanner)
+lib/api.ts                → fetch functions + ratesApiClient (DIP)
+lib/rates.ts              → uniqueProviders, uniqueRateTypes
+lib/sortRates.ts          → pure sort utilities
+lib/format.ts             → formatRateType()
+lib/errors.ts             → getErrorMessage() shared by hooks
+interfaces/               → shared types (rates, hooks, RatesApiClient)
+hooks/                    → data-fetching and sort-state hooks
 ```
 
 ## Environment Variables

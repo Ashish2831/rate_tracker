@@ -1,3 +1,5 @@
+"""Management command: bulk-load rates from the assessment seed parquet file."""
+
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 

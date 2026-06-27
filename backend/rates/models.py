@@ -1,9 +1,13 @@
+"""Django ORM models for providers, raw scrape payloads, and rate snapshots."""
+
 import uuid
 
 from django.db import models
 
 
 class Provider(models.Model):
+    """Financial institution; normalized_name is the canonical lookup key (e.g. 'hsbc')."""
+
     name = models.CharField(max_length=128, unique=True)
     normalized_name = models.CharField(max_length=128, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -16,6 +20,8 @@ class Provider(models.Model):
 
 
 class RawResponse(models.Model):
+    """Immutable scrape payload; external_id enforces idempotent re-ingestion."""
+
     class ParseStatus(models.TextChoices):
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
@@ -42,6 +48,8 @@ class RawResponse(models.Model):
 
 
 class Rate(models.Model):
+    """Point-in-time rate observation; null rate_value = partial record excluded from read APIs."""
+
     provider = models.ForeignKey(Provider, on_delete=models.PROTECT, related_name="rates")
     rate_type = models.CharField(max_length=64, db_index=True)
     rate_value = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
@@ -61,6 +69,7 @@ class Rate(models.Model):
             models.Index(fields=["ingestion_ts"]),
         ]
         constraints = [
+            # Allows multiple observations per business key when ingestion_ts differs.
             models.UniqueConstraint(
                 fields=["provider", "rate_type", "effective_date", "ingestion_ts"],
                 name="unique_rate_snapshot",

@@ -1,6 +1,7 @@
+/** Injectable API surface for hooks (Dependency Inversion). */
+
 import { HistoryResponse, LatestRatesResponse } from "@/interfaces/rates";
 
-/** DIP — hooks depend on this interface, not concrete fetch implementations. */
 export interface RatesApiClient {
   fetchLatestRates(type?: string): Promise<LatestRatesResponse>;
   fetchRateHistory(

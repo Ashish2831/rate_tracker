@@ -1,3 +1,5 @@
+"""History query service — date-range defaults and provider normalization."""
+
 from datetime import date, timedelta
 
 from django.utils import timezone
@@ -19,6 +21,7 @@ class RateHistoryService:
         date_to: str | date | None,
         default_days: int = 30,
     ) -> tuple[date, date]:
+        """Default to the last 30 days when ?from/?to are omitted."""
         if date_to:
             resolved_to = parse_date(date_to) if isinstance(date_to, str) else date_to
         else:

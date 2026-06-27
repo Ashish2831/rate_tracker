@@ -1,3 +1,5 @@
+"""Ingestion orchestrator — coordinates source iteration, persistence, and cache invalidation."""
+
 import logging
 import uuid
 from typing import Any, Callable
@@ -5,11 +7,11 @@ from typing import Any, Callable
 from django.db import transaction
 
 from rates.models import Rate
-from rates.services.cache import invalidate_all_rate_caches
-from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
-from rates.services.parser import parse_rate_record
+from rates.services.cache import invalidate_rate_caches
+from rates.services.exceptions import DuplicateRateError
+from rates.services.parser import parsed_from_ingest
 from rates.services.rate_writer import RateWriter, WriteStats
-from rates.services.sources import ParquetRateSource, RateRecordSource
+from rates.services.sources import RateRecordSource, create_rate_source
 
 logger = logging.getLogger("rates.ingestion")
 
@@ -26,8 +28,8 @@ class IngestionService:
     ):
         self.job_id = job_id or str(uuid.uuid4())
         self.writer = writer or RateWriter()
-        self._source_factory = source_factory or (lambda path: ParquetRateSource(path))
-        self._invalidate_caches = cache_invalidator or invalidate_all_rate_caches
+        self._source_factory = source_factory or create_rate_source
+        self._invalidate_caches = cache_invalidator or invalidate_rate_caches
         self.stats = WriteStats()
 
     def log_start(self, source: str) -> None:
@@ -67,10 +69,7 @@ class IngestionService:
             raise
 
     def ingest_from_api_payload(self, payload: dict[str, Any]) -> Rate:
-        parsed = parse_rate_record(payload)
-        if not parsed:
-            raise InvalidIngestPayloadError("Invalid ingest payload")
-
+        parsed = parsed_from_ingest(payload)
         rate = self.writer.persist_one(parsed, self.stats)
         if not rate:
             raise DuplicateRateError("Duplicate record — idempotent no-op")

@@ -1,3 +1,5 @@
+"""API URL routing for rate endpoints."""
+
 from django.urls import path
 
 from rates.api.views import IngestRateView, LatestRatesView, RateHistoryView

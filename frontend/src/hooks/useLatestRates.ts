@@ -1,14 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+/**
+ * Fetches latest rates with 60s auto-refresh.
+ * Accepts injectable RatesApiClient for testing (DIP).
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { UseLatestRatesOptions, UseLatestRatesResult } from "@/interfaces/hooks";
 import { LatestRate } from "@/interfaces/rates";
-import { ApiError } from "@/lib/api";
-import { ratesApiClient } from "@/lib/ratesApiClient";
-import { uniqueProviders } from "@/lib/sortRates";
+import { getErrorMessage } from "@/lib/errors";
+import { ratesApiClient } from "@/lib/api";
+import { uniqueProviders, uniqueRateTypes } from "@/lib/rates";
 
 const DEFAULT_REFRESH_MS = 60_000;
 
-/** SRP — owns latest-rates fetch, auto-refresh, loading/error state. */
 export function useLatestRates({
   typeFilter = "",
   refreshIntervalMs = DEFAULT_REFRESH_MS,
@@ -23,12 +27,11 @@ export function useLatestRates({
     setLoading(true);
     setError(null);
     try {
-      const data = await client.fetchLatestRates(typeFilter || undefined);
-      setRates(data.results);
+      const { results } = await client.fetchLatestRates(typeFilter || undefined);
+      setRates(results);
       setLastUpdated(new Date());
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Failed to load latest rates.";
-      setError(message);
+      setError(getErrorMessage(err, "Failed to load latest rates."));
     } finally {
       setLoading(false);
     }
@@ -42,7 +45,8 @@ export function useLatestRates({
 
   return {
     rates,
-    providers: uniqueProviders(rates),
+    providers: useMemo(() => uniqueProviders(rates), [rates]),
+    rateTypes: useMemo(() => uniqueRateTypes(rates), [rates]),
     loading,
     error,
     lastUpdated,

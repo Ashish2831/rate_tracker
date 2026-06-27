@@ -1,3 +1,5 @@
+"""Observability middleware — logs requests exceeding SLOW_QUERY_THRESHOLD_MS."""
+
 import logging
 import time
 

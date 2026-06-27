@@ -1,3 +1,5 @@
+"""Structured JSON log formatter for Docker stdout aggregation."""
+
 import json
 import logging
 from datetime import datetime, timezone
@@ -11,6 +13,7 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # Promote common structured fields from logger.extra into the JSON root.
         for key in ("event", "duration_ms", "path", "method", "status_code", "error", "job_id"):
             if hasattr(record, key):
                 payload[key] = getattr(record, key)

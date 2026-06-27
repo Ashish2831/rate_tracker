@@ -1,5 +1,7 @@
-import { LatestRate } from "@/interfaces/rates";
-import { SortDir, SortKey } from "@/interfaces/sort";
+/** Sortable comparison table for latest rates by provider. */
+
+import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
+import { formatRateType } from "@/lib/format";
 import styles from "./RateTable.module.css";
 
 interface Props {
@@ -46,7 +48,7 @@ export function RateTable({ rates, sortKey, sortDir, onSort }: Props) {
           {rates.map((rate) => (
             <tr key={`${rate.provider}-${rate.rate_type}`}>
               <td>{rate.provider}</td>
-              <td>{rate.rate_type.replace(/_/g, " ")}</td>
+              <td>{formatRateType(rate.rate_type)}</td>
               <td className={styles.rateValue}>
                 {rate.rate_value !== null ? Number(rate.rate_value).toFixed(2) : "—"}
               </td>

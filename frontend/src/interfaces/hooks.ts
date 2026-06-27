@@ -1,6 +1,8 @@
+/** Hook option and result types — keeps components decoupled from hook internals. */
+
 import { HistoryPoint, LatestRate } from "@/interfaces/rates";
 import { RatesApiClient } from "@/interfaces/ratesApiClient";
-import { SortDir, SortKey } from "@/interfaces/sort";
+import { SortDir, SortKey } from "@/interfaces/rates";
 
 export interface UseLatestRatesOptions {
   typeFilter?: string;
@@ -11,6 +13,7 @@ export interface UseLatestRatesOptions {
 export interface UseLatestRatesResult {
   rates: LatestRate[];
   providers: string[];
+  rateTypes: string[];
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;

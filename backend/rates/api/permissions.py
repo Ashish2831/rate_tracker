@@ -1,3 +1,5 @@
+"""Permission class requiring successful Bearer token authentication."""
+
 from rest_framework.permissions import BasePermission
 
 

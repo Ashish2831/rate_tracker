@@ -1,3 +1,5 @@
+"""API integration tests — require Postgres and Redis (run via make test in Docker)."""
+
 from datetime import date
 from decimal import Decimal
 

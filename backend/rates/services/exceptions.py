@@ -1,3 +1,6 @@
+"""Typed exceptions for ingestion and webhook error handling."""
+
+
 class IngestionError(Exception):
     """Base class for ingestion failures."""
 

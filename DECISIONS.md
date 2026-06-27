@@ -2,42 +2,11 @@
 
 Engineering decisions for the Rate Tracker assessment.
 
-## Architecture — SOLID & Design Patterns
-
-| Principle | How it is applied |
-|-----------|-------------------|
-| **S — Single Responsibility** | `parser` transforms data, `scraper` handles HTTP transport, `RateWriter` persists, `IngestionService` orchestrates, views handle HTTP only |
-| **O — Open/Closed** | New data sources implement `RateRecordSource` (Protocol) without modifying `IngestionService` |
-| **L — Liskov Substitution** | `ParquetRateSource` is substitutable anywhere a `RateRecordSource` is expected |
-| **I — Interface Segregation** | Thin `RateRecordSource` protocol; views depend on focused `LatestRatesCacheService` / `RateHistoryService` |
-| **D — Dependency Inversion** | Services accept `RateRepository`, `RateWriter`, and cache invalidators via constructor injection (defaults provided) |
-
-**Design patterns used:**
-
-| Pattern | Location | Purpose |
-|---------|----------|---------|
-| **Repository** | `rates/repositories/rate_repository.py` | Encapsulates ORM queries |
-| **Strategy** | `rates/services/sources.py` | Pluggable record sources (parquet, future HTTP/CSV) |
-| **Adapter** | `rates/services/adapters/http.py` | Maps HTTP scrape responses to parsed records |
-| **Facade** | `rates/services/latest_rates_service.py` | Cache-aside + serialization for latest rates |
-| **Typed exceptions** | `rates/services/exceptions.py` | Explicit error handling instead of string matching |
-
-**Frontend (React SOLID):**
-
-| Principle | Location |
-|-----------|----------|
-| **SRP** | Custom hooks (`useLatestRates`, `useRateHistory`, `useSortableRates`) each own one concern |
-| **DIP** | `RatesApiClient` interface — hooks accept injectable client (defaults to `ratesApiClient`) |
-| **Pure functions** | `lib/sortRates.ts` — sorting logic testable without React (Vitest) |
-| **Composition** | `page.tsx` wires hooks + presentational components only |
-
----
-
 ## Assumptions
 
 ### 1. Seed file simulates scraped data
 
-The parquet file includes `source_url` and `raw_response_id` fields as if data were fetched over HTTP. The `seed_data` command loads from parquet; the scraper module handles live HTTP for webhook-style ingestion and is tested with mocked responses.
+The parquet file includes `source_url` and `raw_response_id` fields as if data were fetched over HTTP. The `seed_data` command loads from parquet; `scraper.py` handles HTTP transport and `parser.parse_scrape_payload()` normalizes scrape responses (tested with mocked HTTP in `test_scraper.py`).
 
 **Example — a row in the seed file looks like a scrape result:**
 
@@ -56,7 +25,8 @@ The parquet file includes `source_url` and `raw_response_id` fields as if data w
 | Path | What it does |
 |------|--------------|
 | `python manage.py seed_data` | Reads parquet in bulk (assessment requirement) |
-| `rates/services/scraper.py` | Handles real HTTP (timeouts, 503 errors) for webhooks/live ingestion |
+| `rates/services/scraper.py` | HTTP transport (timeouts, 503 errors) |
+| `rates/services/parser.py` | `parse_scrape_payload()` — normalizes HTTP body to parsed record |
 | pytest (`test_scraper.py`) | Mocks HTTP and verifies parsed output matches a known fixture |
 
 In production, live URLs would be scraped on a schedule. For the assessment, parquet is the stand-in dataset with the same shape.
@@ -348,3 +318,53 @@ POST /api/rates/ingest succeeds
 ```
 
 This would reduce API load and give true real-time updates when ingest webhooks fire.
+
+---
+
+## Architecture — SOLID
+
+| Principle | How it is applied |
+|-----------|-------------------|
+| **S — Single Responsibility** | `parser` transforms data, `scraper` handles HTTP transport, `RateWriter` persists, `IngestionService` orchestrates, views handle HTTP only |
+| **O — Open/Closed** | New data sources implement `RateRecordSource` (Protocol) without modifying `IngestionService` |
+| **L — Liskov Substitution** | `ParquetRateSource` is substitutable anywhere a `RateRecordSource` is expected |
+| **I — Interface Segregation** | Thin `RateRecordSource` protocol; views depend on focused `LatestRatesCacheService` / `RateHistoryService` |
+| **D — Dependency Inversion** | Services accept `RateRepository`, `RateWriter`, and cache invalidators via constructor injection (defaults provided) |
+
+---
+
+## Design Patterns
+
+| Pattern | Location | Purpose |
+|---------|----------|---------|
+| **Repository** | `rates/repositories/rate_repository.py` | Encapsulates ORM queries |
+| **Strategy** | `rates/services/sources.py` | Pluggable record sources (parquet, future HTTP/CSV) |
+| **Factory Method** | `rates/services/sources.py` (`create_rate_source`) | Selects concrete source from path without changing callers |
+| **Value Object** | `rates/services/parsed_rate.py` (`ParsedRate`) | Typed domain record replacing raw dicts through parser → writer |
+| **Adapter** | `rates/services/parser.py` (`parse_scrape_payload`) | Maps HTTP scrape responses to parsed records |
+| **Facade** | `rates/services/latest_rates_service.py` | Cache-aside + serialization for latest rates |
+| **Typed exceptions** | `rates/services/exceptions.py` | Explicit error handling instead of string matching |
+
+---
+
+## Frontend (React SOLID)
+
+| Principle | Location |
+|-----------|----------|
+| **SRP** | Custom hooks (`useLatestRates`, `useRateHistory`, `useSortableRates`) each own one concern |
+| **DIP** | `RatesApiClient` in `interfaces/ratesApiClient.ts` — hooks accept injectable client (default in `lib/api.ts`) |
+| **Pure functions** | `lib/sortRates.ts`, `lib/format.ts`, `lib/rates.ts`, `lib/errors.ts` — testable without React |
+| **Composition** | `page.tsx` wires hooks + presentational components only; default provider/type selection via `useEffect` |
+
+---
+
+## Testing
+
+| Layer | Location | Needs Docker? |
+|-------|----------|---------------|
+| Parser / writer unit tests | `test_parser.py`, `test_services.py` | No |
+| HTTP scrape transport + payload parsing | `test_scraper.py` | No |
+| API integration tests | `test_api.py` | Yes (Postgres + Redis via Compose) |
+| Frontend sort utilities | `sortRates.test.ts` (Vitest) | No |
+
+`make test` runs the full suite inside Compose. Without Docker, run the unit-test rows above locally; API tests require the database.

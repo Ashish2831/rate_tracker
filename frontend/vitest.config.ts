@@ -1,3 +1,5 @@
+/** Vitest config — path alias matches tsconfig @/ imports. */
+
 import { defineConfig } from "vitest/config";
 import path from "path";
 

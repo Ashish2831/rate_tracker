@@ -1,3 +1,5 @@
+"""Unit tests for parser normalization and partial-record handling."""
+
 from decimal import Decimal
 
 from rates.services.parser import normalize_provider_name, parse_rate_record, validate_rate_value
@@ -29,4 +31,4 @@ def test_parse_rate_record_partial_on_null_value():
     }
     parsed = parse_rate_record(record)
     assert parsed is not None
-    assert parsed["parse_status"] == "partial"
+    assert parsed.parse_status == "partial"

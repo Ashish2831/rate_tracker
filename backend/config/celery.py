@@ -1,3 +1,5 @@
+"""Celery application and Beat schedule for scheduled parquet re-ingestion."""
+
 import os
 
 from celery import Celery

@@ -1,3 +1,5 @@
+/** Root layout — global styles and HTML shell. */
+
 import type { ReactNode } from "react";
 import "./globals.css";
 

@@ -1,3 +1,5 @@
+/** Inline error display with optional retry action. */
+
 import styles from "./ErrorBanner.module.css";
 
 interface Props {

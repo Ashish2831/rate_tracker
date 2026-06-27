@@ -1,3 +1,5 @@
+"""Django app config for the rates application."""
+
 from django.apps import AppConfig
 
 

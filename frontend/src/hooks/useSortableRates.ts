@@ -1,11 +1,11 @@
+/** Table sort state — delegates comparison logic to pure sortRates(). */
+
 import { useCallback, useMemo, useState } from "react";
 
 import { UseSortableRatesResult } from "@/interfaces/hooks";
-import { LatestRate } from "@/interfaces/rates";
-import { SortDir, SortKey } from "@/interfaces/sort";
+import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
 import { nextSortState, sortRates } from "@/lib/sortRates";
 
-/** SRP — owns sort state and delegates ordering to pure sortRates(). */
 export function useSortableRates(
   rates: LatestRate[],
   initialKey: SortKey = "rate_value",

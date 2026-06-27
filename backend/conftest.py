@@ -1,3 +1,5 @@
+"""Pytest defaults — test env vars for local runs without Docker."""
+
 import os
 
 os.environ.setdefault("DJANGO_SECRET_KEY", "test-secret-key")

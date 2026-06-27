@@ -1,3 +1,5 @@
+"""Unit tests for ingestion orchestration and date-range defaults."""
+
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -50,3 +52,17 @@ def test_rate_history_service_default_date_range():
     date_from, date_to = RateHistoryService.resolve_date_range(None, date(2025, 6, 30))
     assert date_to == date(2025, 6, 30)
     assert date_from == date(2025, 5, 31)
+
+
+def test_create_rate_source_parquet():
+    from rates.services.sources import ParquetRateSource, create_rate_source
+
+    source = create_rate_source("/data/rates_seed.parquet")
+    assert isinstance(source, ParquetRateSource)
+
+
+def test_create_rate_source_unsupported():
+    from rates.services.sources import create_rate_source
+
+    with pytest.raises(ValueError, match="Unsupported rate source"):
+        create_rate_source("/data/rates.csv")

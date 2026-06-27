@@ -16,7 +16,7 @@ logs:
 seed:
 	docker compose exec backend python manage.py seed_data
 
-test: test-backend
+test: test-backend test-frontend
 
 test-backend:
 	docker compose exec backend pytest

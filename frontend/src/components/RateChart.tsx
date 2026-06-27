@@ -1,3 +1,5 @@
+/** 30-day line chart for a selected provider and rate type (Recharts). */
+
 "use client";
 
 import {
@@ -10,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { HistoryPoint } from "@/interfaces/rates";
+import { formatRateType } from "@/lib/format";
 import styles from "./RateChart.module.css";
 
 interface Props {
@@ -22,7 +25,7 @@ export function RateChart({ data, provider, rateType }: Props) {
   if (data.length === 0) {
     return (
       <p className={styles.empty}>
-        No history data for {provider} — {rateType.replace(/_/g, " ")}.
+        No history data for {provider} — {formatRateType(rateType)}.
       </p>
     );
   }
