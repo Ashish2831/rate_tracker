@@ -55,6 +55,19 @@ def test_rate_history_service_default_date_range():
     assert date_from == date(2025, 5, 31)
 
 
+def test_rate_history_service_anchors_to_latest_data(mocker):
+    from rates.services.rate_history_service import RateHistoryService
+
+    repo = mocker.Mock()
+    repo.get_latest_effective_date.return_value = date(2024, 9, 25)
+    repo.get_history.return_value = []
+
+    service = RateHistoryService(repository=repo)
+    service.get_history("HSBC", "15yr_fixed_mortgage")
+
+    repo.get_history.assert_called_once_with("hsbc", "15yr_fixed_mortgage", date(2024, 8, 26), date(2024, 9, 25))
+
+
 def test_create_rate_source_parquet():
     from rates.services.sources import HttpRateSource, ParquetRateSource, create_rate_source
 
@@ -104,8 +117,9 @@ def test_latest_cache_key_includes_epoch(mocker):
     from rates.services import cache as cache_mod
 
     mocker.patch.object(cache_mod, "get_cache_epoch", return_value=3)
-    assert cache_mod.latest_cache_key("30yr_fixed_mortgage") == "rates:latest:3:30yr_fixed_mortgage"
-    assert cache_mod.latest_cache_key() == "rates:latest:3:all"
+    assert cache_mod.latest_cache_key("30yr_fixed_mortgage") == "rates:latest:3:all:30yr_fixed_mortgage"
+    assert cache_mod.latest_cache_key() == "rates:latest:3:all:all"
+    assert cache_mod.latest_cache_key("30yr_fixed_mortgage", "chase") == "rates:latest:3:chase:30yr_fixed_mortgage"
 
 
 def test_invalidate_rate_caches_increments_epoch():

@@ -59,6 +59,29 @@ def test_latest_rates_cached(api_client, sample_rate):
 
 
 @pytest.mark.django_db
+def test_latest_rates_filters_by_provider_and_type(api_client, sample_rate):
+    cache.clear()
+    response = api_client.get(
+        "/api/rates/latest",
+        {"provider": "Chase", "type": "30yr_fixed_mortgage"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 1
+    assert response.data["results"][0]["provider"] == "Chase"
+    assert response.data["results"][0]["rate_type"] == "30yr_fixed_mortgage"
+
+
+@pytest.mark.django_db
+def test_rate_filters_endpoint(api_client, sample_rate):
+    response = api_client.get("/api/rates/filters")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "Chase" in response.data["providers"]
+    assert "30yr_fixed_mortgage" in response.data["rate_types"]
+
+
+@pytest.mark.django_db
 def test_history_endpoint_requires_params(api_client):
     response = api_client.get("/api/rates/history")
     assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -74,6 +97,47 @@ def test_history_endpoint_paginated(api_client, sample_rate):
     assert response.status_code == status.HTTP_200_OK
     assert "results" in response.data
     assert len(response.data["results"]) >= 1
+
+
+@pytest.mark.django_db
+def test_ingested_rates_endpoint(api_client, sample_rate):
+    response = api_client.get("/api/rates/ingested")
+
+    assert response.status_code == status.HTTP_200_OK
+    assert "results" in response.data
+    assert len(response.data["results"]) >= 1
+    assert response.data["results"][0]["provider"] == "Chase"
+
+
+@pytest.mark.django_db
+def test_ingested_rates_filters_by_provider(api_client, sample_rate):
+    response = api_client.get("/api/rates/ingested", {"provider": "Chase", "type": "30yr_fixed_mortgage"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert all(r["provider"] == "Chase" for r in response.data["results"])
+
+
+@pytest.mark.django_db
+def test_ingest_with_staff_session(api_client, settings):
+    cache.clear()
+    from django.contrib.auth import get_user_model
+
+    user = get_user_model().objects.create_superuser("apiadmin", "admin@test.com", "testpass123")
+    api_client.force_login(user)
+    response = api_client.post(
+        "/api/rates/ingest",
+        {
+            "provider": "Chase",
+            "rate_type": "savings_easy_access",
+            "rate_value": "4.25",
+            "effective_date": str(date.today()),
+            "raw_response_id": "session-ingest-001",
+        },
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["rate_type"] == "savings_easy_access"
 
 
 @pytest.mark.django_db

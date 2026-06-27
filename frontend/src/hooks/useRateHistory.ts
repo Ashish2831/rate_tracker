@@ -1,57 +1,40 @@
 /**
- * Fetches paginated rate history for chart display.
- * Drops null rate_value rows (partial records from backend).
+ * Rate history via TanStack Query — cached per provider + type, aggregated for charting.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import { UseRateHistoryOptions, UseRateHistoryResult } from "@/interfaces/hooks";
-import { HistoryPoint } from "@/interfaces/rates";
-import { RatesApiClient } from "@/interfaces/ratesApiClient";
 import { getErrorMessage } from "@/lib/errors";
+import { aggregateHistoryByDay } from "@/lib/history";
 import { ratesApiClient } from "@/lib/api";
+import { rateKeys } from "@/lib/queryKeys";
 
-function toHistoryPoints(
-  results: Awaited<ReturnType<RatesApiClient["fetchRateHistory"]>>["results"]
-): HistoryPoint[] {
-  return results
-    .filter((rate) => rate.rate_value !== null)
-    .map((rate) => ({
-      effective_date: rate.effective_date,
-      rate_value: Number(rate.rate_value),
-    }));
-}
+const HISTORY_STALE_MS = 60_000;
 
 export function useRateHistory({
   provider,
   rateType,
+  enabled = true,
   client = ratesApiClient,
 }: UseRateHistoryOptions): UseRateHistoryResult {
-  const [history, setHistory] = useState<HistoryPoint[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: rateKeys.history(provider, rateType),
+    queryFn: async () => {
+      const results = await client.fetchAllRateHistory(provider, rateType);
+      return aggregateHistoryByDay(results);
+    },
+    enabled: enabled && Boolean(provider && rateType),
+    staleTime: HISTORY_STALE_MS,
+    placeholderData: keepPreviousData,
+  });
 
-  const refresh = useCallback(async () => {
-    if (!provider || !rateType) {
-      setHistory([]);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await client.fetchRateHistory(provider, rateType);
-      setHistory(toHistoryPoints(data.results));
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to load rate history."));
-      setHistory([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [client, provider, rateType]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { history, loading, error, refresh };
+  return {
+    history: query.data ?? [],
+    loading: query.isPending && !query.isPlaceholderData,
+    error: query.error ? getErrorMessage(query.error, "Failed to load rate history.") : null,
+    refresh: async () => {
+      await query.refetch();
+    },
+  };
 }

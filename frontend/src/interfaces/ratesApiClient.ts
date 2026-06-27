@@ -1,13 +1,20 @@
 /** Injectable API surface for hooks (Dependency Inversion). */
 
-import { HistoryResponse, LatestRatesResponse } from "@/interfaces/rates";
+import { HistoryRate, LatestRatesResponse, RateFiltersResponse } from "@/interfaces/rates";
 
 export interface RatesApiClient {
-  fetchLatestRates(type?: string): Promise<LatestRatesResponse>;
-  fetchRateHistory(
+  fetchLatestRates(provider?: string, type?: string): Promise<LatestRatesResponse>;
+  fetchRateFilters(): Promise<RateFiltersResponse>;
+  fetchAllRateHistory(
     provider: string,
     type: string,
     from?: string,
     to?: string
-  ): Promise<HistoryResponse>;
+  ): Promise<HistoryRate[]>;
+  fetchAllIngestedRates(
+    provider?: string,
+    type?: string,
+    from?: string,
+    to?: string
+  ): Promise<HistoryRate[]>;
 }

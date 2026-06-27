@@ -12,10 +12,14 @@ def get_cache_epoch(cache_backend=cache) -> int:
     return 0 if epoch is None else int(epoch)
 
 
-def latest_cache_key(rate_type: str | None = None, cache_backend=cache) -> str:
+def latest_cache_key(
+    rate_type: str | None = None,
+    provider: str | None = None,
+    cache_backend=cache,
+) -> str:
     """Key includes epoch so invalidation is O(1) via INCR instead of delete_pattern."""
     epoch = get_cache_epoch(cache_backend)
-    return f"{LATEST_CACHE_PREFIX}:{epoch}:{rate_type or 'all'}"
+    return f"{LATEST_CACHE_PREFIX}:{epoch}:{provider or 'all'}:{rate_type or 'all'}"
 
 
 def invalidate_rate_caches(cache_backend=cache) -> None:

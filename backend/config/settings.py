@@ -134,6 +134,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
         "rates.api.authentication.BearerTokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
@@ -142,6 +143,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
 }
+
+LOGIN_URL = "/api-auth/login/"
+LOGIN_REDIRECT_URL = "/api/"
 
 CORS_ALLOWED_ORIGINS = [
     origin.strip()

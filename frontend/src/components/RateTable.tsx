@@ -1,4 +1,4 @@
-/** Sortable comparison table for latest rates by provider. */
+/** Sortable comparison table for latest and ingested rates. */
 
 import { EmptyState } from "@/components/EmptyState";
 import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
@@ -11,6 +11,9 @@ interface Props {
   sortDir: SortDir;
   onSort: (key: SortKey) => void;
   isSorting?: boolean;
+  variant?: "latest" | "ingested";
+  emptyTitle?: string;
+  emptyDescription?: string;
 }
 
 function ariaSortValue(key: SortKey, activeKey: SortKey, dir: SortDir): "ascending" | "descending" | "none" {
@@ -18,25 +21,46 @@ function ariaSortValue(key: SortKey, activeKey: SortKey, dir: SortDir): "ascendi
   return dir === "asc" ? "ascending" : "descending";
 }
 
+function rowKey(rate: LatestRate, index: number): string {
+  const withId = rate as LatestRate & { id?: number };
+  if (withId.id != null) {
+    return String(withId.id);
+  }
+  return `${rate.provider}-${rate.rate_type}-${index}`;
+}
+
 function SortIndicator({ active, dir }: { active: boolean; dir: SortDir }) {
   if (!active) return <span className={styles.sort} aria-hidden="true">↕</span>;
   return <span className={`${styles.sort} ${styles.sortActive}`} aria-hidden="true">{dir === "asc" ? "↑" : "↓"}</span>;
 }
 
-export function RateTable({ rates, sortKey, sortDir, onSort, isSorting }: Props) {
+export function RateTable({
+  rates,
+  sortKey,
+  sortDir,
+  onSort,
+  isSorting,
+  variant = "latest",
+  emptyTitle = "No rates yet",
+  emptyDescription,
+}: Props) {
   if (rates.length === 0) {
     return (
       <EmptyState
         icon="table"
-        title="No rates yet"
+        title={emptyTitle}
         description={
-          <>
-            Load seed data to get started — run <code>make seed</code> in your terminal.
-          </>
+          emptyDescription ?? (
+            <>
+              Load seed data to get started — run <code>make seed</code> in your terminal.
+            </>
+          )
         }
       />
     );
   }
+
+  const showEffectiveDate = variant === "ingested";
 
   return (
     <div className={styles.wrapper} aria-busy={isSorting || undefined}>
@@ -54,16 +78,18 @@ export function RateTable({ rates, sortKey, sortDir, onSort, isSorting }: Props)
                 Rate <SortIndicator active={sortKey === "rate_value"} dir={sortDir} />
               </button>
             </th>
+            {showEffectiveDate && <th>Effective Date</th>}
             <th aria-sort={ariaSortValue("ingestion_ts", sortKey, sortDir)}>
               <button type="button" onClick={() => onSort("ingestion_ts")}>
-                Last Updated <SortIndicator active={sortKey === "ingestion_ts"} dir={sortDir} />
+                {showEffectiveDate ? "Ingested At" : "Last Updated"}{" "}
+                <SortIndicator active={sortKey === "ingestion_ts"} dir={sortDir} />
               </button>
             </th>
           </tr>
         </thead>
         <tbody>
-          {rates.map((rate) => (
-            <tr key={`${rate.provider}-${rate.rate_type}`}>
+          {rates.map((rate, index) => (
+            <tr key={rowKey(rate, index)}>
               <td>
                 <span className={styles.provider}>{rate.provider}</span>
               </td>
@@ -73,6 +99,9 @@ export function RateTable({ rates, sortKey, sortDir, onSort, isSorting }: Props)
               <td>
                 <span className={styles.rateValue}>{formatRateValue(rate.rate_value !== null ? Number(rate.rate_value) : null)}</span>
               </td>
+              {showEffectiveDate && (
+                <td className={styles.timestamp}>{rate.effective_date}</td>
+              )}
               <td className={styles.timestamp}>{new Date(rate.ingestion_ts).toLocaleString()}</td>
             </tr>
           ))}

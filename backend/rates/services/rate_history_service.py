@@ -42,5 +42,15 @@ class RateHistoryService:
         date_to: str | date | None = None,
     ):
         normalized = normalize_provider_name(provider).lower()
-        resolved_from, resolved_to = self.resolve_date_range(date_from, date_to)
+        # Seed/demo data is often historical — anchor the default window to latest
+        # available observations instead of calendar "today" (which may have no rows).
+        if date_from is None and date_to is None:
+            anchor = self.repository.get_latest_effective_date(normalized, rate_type)
+            if anchor:
+                resolved_to = anchor
+                resolved_from = anchor - timedelta(days=30)
+            else:
+                resolved_from, resolved_to = self.resolve_date_range(None, None)
+        else:
+            resolved_from, resolved_to = self.resolve_date_range(date_from, date_to)
         return self.repository.get_history(normalized, rate_type, resolved_from, resolved_to)

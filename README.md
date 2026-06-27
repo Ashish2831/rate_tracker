@@ -78,7 +78,7 @@ make test-backend
 make test-frontend
 ```
 
-Without Docker, unit tests only (14 backend + 5 frontend — API tests need Postgres):
+Without Docker, unit tests only (21 backend + 7 frontend — API tests need Postgres):
 
 ```bash
 cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py rates/tests/test_scraper.py
@@ -98,23 +98,34 @@ make logs
 | Command | Description |
 |---------|-------------|
 | `make up` | Build and start all containers |
+| `make up-lite` | Postgres, Redis, backend, frontend only (no Celery) |
 | `make down` | Stop containers |
+| `make build` | Rebuild Docker images |
 | `make seed` | Load parquet seed data |
 | `make test` | Run backend pytest + frontend Vitest |
 | `make test-backend` | Backend pytest only (in Docker) |
 | `make test-frontend` | Frontend Vitest only (in Docker) |
 | `make migrate` | Run Django migrations |
+| `make shell` | Django shell in backend container |
+| `make frontend-deps` | Sync frontend `node_modules` after `package.json` changes |
+| `make createsuperuser` | Create Django admin user |
 | `make logs` | Follow container logs |
 
 ## API Endpoints
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/rates/latest` | None | Latest rate per provider. Optional `?type=` filter. Cache-aside (Redis, 60s TTL, epoch invalidation on ingest). |
+| GET | `/api/rates/latest` | None | Latest rate per provider. Optional `?provider=` and `?type=` filters. Cache-aside (Redis, 60s TTL, epoch invalidation on ingest). |
 | GET | `/api/rates/history` | None | Paginated history. Requires `?provider=` and `?type=`. Optional `?from=` and `?to=`. |
+| GET | `/api/rates/filters` | None | Provider and rate-type options for dashboard filters. |
+| GET | `/api/rates/ingested` | None | Rates ingested in a 24-hour window. Optional `?provider=`, `?type=`, `?from=`, `?to=`. |
 | POST | `/api/rates/ingest` | Bearer token | Webhook ingest. Set `INGEST_BEARER_TOKEN` in `.env`. |
 
-### Example: ingest webhook
+### Ingest webhook demo
+
+Full walkthrough (auth, validation, DB write, cache invalidation, idempotency): **[docs/INGEST_WEBHOOK.md](docs/INGEST_WEBHOOK.md)**
+
+Quick example:
 
 ```bash
 curl -X POST http://localhost:8000/api/rates/ingest \
@@ -124,7 +135,8 @@ curl -X POST http://localhost:8000/api/rates/ingest \
     "provider": "Chase",
     "rate_type": "30yr_fixed_mortgage",
     "rate_value": "6.75",
-    "effective_date": "2025-06-01"
+    "effective_date": "2025-06-01",
+    "raw_response_id": "webhook-demo-001"
   }'
 ```
 
@@ -146,7 +158,7 @@ rates_seed.parquet
  Next.js Dashboard (auto-refresh 60s)
 ```
 
-See [schema.md](./schema.md) for database design and [DECISIONS.md](./DECISIONS.md) for engineering rationale and SOLID/design-pattern notes.
+See [docs/SCHEMA.md](./docs/SCHEMA.md) for database design and [docs/DECISIONS.md](./docs/DECISIONS.md) for engineering rationale and SOLID/design-pattern notes.
 
 ## Architecture (SOLID)
 
@@ -156,6 +168,8 @@ See [schema.md](./schema.md) for database design and [DECISIONS.md](./DECISIONS.
 API Views (HTTP only)
     ├── LatestRatesCacheService  → RateRepository + Redis (Cache-Aside + epoch invalidation)
     ├── RateHistoryService       → RateRepository
+    ├── IngestedRatesService     → RateRepository
+    ├── RateFiltersService       → RateRepository
     └── IngestionService         → RateWriter + RateRecordSource (Strategy)
 
 RateWriter (persist)  →  ProviderResolver + ORM
@@ -169,15 +183,20 @@ parser.py             →  parse_scrape_payload() maps HTTP body → record (Ada
 ### Frontend
 
 ```
-page.tsx (composition only)
-    ├── useLatestRates      → fetch + auto-refresh + loading/error (SRP)
-    ├── useRateHistory      → chart data fetch (SRP)
-    └── useSortableRates    → sort state → sortRates() pure fn (SRP)
+QueryProvider (TanStack Query)
+DashboardClient.tsx (composition only)
+    ├── useRateFilters       → filter dropdown options (cached 5 min)
+    ├── useLatestRates       → fetch + auto-refresh + loading/error (SRP)
+    ├── useRateHistory       → chart data fetch + day aggregation (SRP)
+    ├── useIngestedRates     → 24h ingested table (SRP)
+    └── useSortableRates     → sort state → sortRates() pure fn (SRP)
 
-lib/api.ts                → fetch functions + ratesApiClient (DIP)
-lib/rates.ts              → uniqueProviders, uniqueRateTypes
+lib/api.ts                → ratesApiClient (DIP)
+lib/queryKeys.ts          → TanStack Query cache keys
+lib/history.ts            → aggregateHistoryByDay (chart)
+lib/rates.ts              → groupRatesByProvider (dashboard overview cards)
 lib/sortRates.ts          → pure sort utilities
-lib/format.ts             → formatRateType()
+lib/format.ts             → formatRateType(), formatRateValue()
 lib/errors.ts             → getErrorMessage() shared by hooks
 interfaces/               → shared types (rates, hooks, RatesApiClient)
 hooks/                    → data-fetching and sort-state hooks
@@ -193,11 +212,11 @@ Copy `.env.example` to `.env`. All required variables are documented there. The 
 ├── backend/           # Django + DRF + Celery
 ├── frontend/          # Next.js dashboard
 ├── data/              # rates_seed.parquet
-├── scripts/           # Helper scripts
+├── docs/              # SCHEMA.md, DECISIONS.md, AWS_DEPLOYMENT.md, INGEST_WEBHOOK.md
+├── infra/terraform/   # AWS infrastructure
+├── scripts/           # logs.sh, aws/*.sh
 ├── docker-compose.yml
-├── Makefile
-├── schema.md
-└── DECISIONS.md
+└── Makefile
 ```
 
 ## Architectural Choices
@@ -205,7 +224,7 @@ Copy `.env.example` to `.env`. All required variables are documented there. The 
 - **Django + DRF** for typed API with built-in admin and migrations
 - **PostgreSQL** with composite indexes tuned for the three required query patterns
 - **Redis** for API response caching (cache-aside + epoch invalidation) and Celery broker
-- **Celery Beat** for scheduled ingestion (justified in DECISIONS.md)
+- **Celery Beat** for scheduled ingestion (justified in [docs/DECISIONS.md](./docs/DECISIONS.md))
 - **Bulk parquet loading** with batch deduplication for ~1M row performance
 - **Structured JSON logging** for ingestion jobs and slow-request warnings (>200ms)
 
@@ -221,7 +240,7 @@ Only `GET /api/rates/latest` is cached.
 | **Eviction** | TTL (60s passive) + epoch orphan cleanup; no LRU/LFU (small keyspace) |
 | **TTL** | 60 seconds per cached response |
 
-See [DECISIONS.md](./DECISIONS.md#caching-strategy) for flow examples and tradeoffs.
+See [docs/DECISIONS.md](./docs/DECISIONS.md#caching-strategy) for flow examples and tradeoffs.
 
 ## Observability
 

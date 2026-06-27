@@ -1,10 +1,11 @@
 /** Hook option and result types — keeps components decoupled from hook internals. */
 
-import { HistoryPoint, LatestRate } from "@/interfaces/rates";
+import { HistoryPoint, IngestedRate, LatestRate } from "@/interfaces/rates";
 import { RatesApiClient } from "@/interfaces/ratesApiClient";
 import { SortDir, SortKey } from "@/interfaces/rates";
 
 export interface UseLatestRatesOptions {
+  providerFilter?: string;
   typeFilter?: string;
   refreshIntervalMs?: number;
   client?: RatesApiClient;
@@ -12,8 +13,6 @@ export interface UseLatestRatesOptions {
 
 export interface UseLatestRatesResult {
   rates: LatestRate[];
-  providers: string[];
-  rateTypes: string[];
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;
@@ -23,11 +22,26 @@ export interface UseLatestRatesResult {
 export interface UseRateHistoryOptions {
   provider: string;
   rateType: string;
+  enabled?: boolean;
   client?: RatesApiClient;
 }
 
 export interface UseRateHistoryResult {
   history: HistoryPoint[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export interface UseIngestedRatesOptions {
+  provider?: string;
+  rateType?: string;
+  enabled?: boolean;
+  client?: RatesApiClient;
+}
+
+export interface UseIngestedRatesResult {
+  records: IngestedRate[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -39,4 +53,12 @@ export interface UseSortableRatesResult {
   sortDir: SortDir;
   toggleSort: (key: SortKey) => void;
   isSorting?: boolean;
+}
+
+export interface UseRateFiltersResult {
+  providers: string[];
+  rateTypes: string[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
 }

@@ -47,7 +47,7 @@ export function RateChart({ data, provider, rateType }: Props) {
             type: "scatter",
             mode: "lines+markers",
             name: "Rate",
-            line: { color: CHART_COLOR, width: 2.5, shape: "spline" },
+            line: { color: CHART_COLOR, width: 2.5, shape: "linear" },
             marker: { size: 7, color: CHART_COLOR, line: { color: "#fff", width: 1.5 } },
             fill: "tozeroy",
             fillcolor: CHART_FILL,
@@ -61,6 +61,7 @@ export function RateChart({ data, provider, rateType }: Props) {
           xaxis: {
             title: "",
             tickformat: "%b %d",
+            dtick: 86400000 * 3,
             gridcolor: "#f1f5f9",
             linecolor: "#e2e8f0",
             tickfont: { size: 11, color: "#94a3b8" },

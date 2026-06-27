@@ -3,7 +3,12 @@
  */
 
 import { DashboardClient } from "@/components/DashboardClient";
+import { QueryProvider } from "@/components/QueryProvider";
 
 export default function DashboardPage() {
-  return <DashboardClient />;
+  return (
+    <QueryProvider>
+      <DashboardClient />
+    </QueryProvider>
+  );
 }

@@ -177,6 +177,8 @@ Running `python manage.py seed_data` multiple times does not create duplicate ra
 
 ### Example — webhook idempotency
 
+Full live demo (auth, validation, cache bust, structured errors): **[INGEST_WEBHOOK.md](INGEST_WEBHOOK.md)**
+
 ```bash
 # First call
 curl -X POST http://localhost:8000/api/rates/ingest \
@@ -321,6 +323,58 @@ POST /api/rates/ingest succeeds
 
 This would reduce API load and give true real-time updates when ingest webhooks fire.
 
+### Tertiary: JWT for ingest authentication (replacing static bearer secret)
+
+**Current approach (assessment requirement 2B):**
+
+Ingest uses DRF `BearerTokenAuthentication` with a **single shared secret** from `INGEST_BEARER_TOKEN`:
+
+```http
+Authorization: Bearer dev-ingest-token-change-me
+```
+
+Validation is string equality — no expiry, no per-client identity, no scopes. Read endpoints remain `AllowAny`. Staff session login on `/api-auth/login/` is a dev-only convenience for the browsable API, not production ingest auth.
+
+**Why this is correct for the take-home:**
+
+- Satisfies “ingest requires bearer token, GET works without auth”
+- No external auth service (Auth0, Cognito, etc.)
+- Simple for one webhook caller or demo `curl`
+
+**Example limitation at scale:**
+
+```
+Partner A and Partner B both use the same INGEST_BEARER_TOKEN
+  → cannot revoke one without rotating for both
+  → no audit trail of which client ingested a row
+  → leaked token is valid until manual env rotation
+```
+
+**Proposed improvement:**
+
+Replace the static secret with **signed JWTs** (still sent as `Authorization: Bearer <jwt>` — Bearer is the scheme, JWT is the token format):
+
+```
+POST /api/rates/ingest
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+         │
+         ├─ iss: "rate-tracker"
+         ├─ sub: "partner-chase-webhook"
+         ├─ scope: "rates:ingest"
+         └─ exp: 1h
+```
+
+Implementation sketch (still no external IdP required for v1):
+
+| Piece | Approach |
+|-------|----------|
+| Issue tokens | Internal admin endpoint or CLI (`manage.py issue_ingest_token --client chase`) |
+| Verify | DRF auth class using `PyJWT` + `INGEST_JWT_SECRET` (or RS256 key pair) |
+| Revoke | Short TTL (15–60 min) + optional denylist in Redis for compromised tokens |
+| Multi-tenant | `sub` / `client_id` claim logged on each ingest for audit |
+
+Read endpoints stay public; only ingest moves from static bearer → JWT. Webhook callers would fetch or receive a JWT instead of a forever-shared string.
+
 ---
 
 ## Caching Strategy
@@ -431,10 +485,10 @@ Steady read traffic   → cache refreshed on miss; TTL resets on each set()
 
 | Principle | Location |
 |-----------|----------|
-| **SRP** | Custom hooks (`useLatestRates`, `useRateHistory`, `useSortableRates`) each own one concern |
+| **SRP** | Custom hooks (`useRateFilters`, `useLatestRates`, `useRateHistory`, `useIngestedRates`, `useSortableRates`) each own one concern |
 | **DIP** | `RatesApiClient` in `interfaces/ratesApiClient.ts` — hooks accept injectable client (default in `lib/api.ts`) |
-| **Pure functions** | `lib/sortRates.ts`, `lib/format.ts`, `lib/rates.ts`, `lib/errors.ts` — testable without React |
-| **Composition** | `page.tsx` wires hooks + presentational components only; default provider/type selection via `useEffect` |
+| **Pure functions** | `lib/sortRates.ts`, `lib/format.ts`, `lib/rates.ts`, `lib/history.ts`, `lib/errors.ts` — testable without React |
+| **Composition** | `DashboardClient.tsx` wires hooks + presentational components; filters default to `""` via `useState` |
 
 ---
 
@@ -445,7 +499,7 @@ Steady read traffic   → cache refreshed on miss; TTL resets on each set()
 | Parser / writer unit tests | `test_parser.py`, `test_services.py` | No |
 | HTTP scrape transport + payload parsing | `test_scraper.py` | No |
 | API integration tests | `test_api.py` | Yes (Postgres + Redis via Compose) |
-| Frontend sort utilities | `sortRates.test.ts` (Vitest) | No |
+| Frontend unit tests | `sortRates.test.ts`, `rates.test.ts`, `history.test.ts` (Vitest) | No |
 
 `make test` runs the full suite inside Compose. Without Docker, run the unit-test rows above locally; API tests require the database.
 

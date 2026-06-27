@@ -4,6 +4,7 @@ import logging
 
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,7 +14,9 @@ from rates.api.permissions import HasBearerToken
 from rates.api.serializers import IngestRateSerializer, RateSerializer
 from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
 from rates.services.ingestion import IngestionService
+from rates.services.ingested_rates_service import IngestedRatesService
 from rates.services.latest_rates_service import LatestRatesCacheService
+from rates.services.rate_filters_service import RateFiltersService
 from rates.services.rate_history_service import RateHistoryService
 
 logger = logging.getLogger("rates.api")
@@ -38,9 +41,18 @@ class LatestRatesView(ServiceAPIView):
     service_class = LatestRatesCacheService
 
     def get(self, request):
-        rate_type = request.query_params.get("type")
-        data, cached = self.get_service().get_latest(rate_type)
+        data, cached = self.get_service().get_latest(
+            rate_type=request.query_params.get("type"),
+            provider=request.query_params.get("provider"),
+        )
         return Response({"count": len(data), "results": data, "cached": cached})
+
+
+class RateFiltersView(ServiceAPIView):
+    service_class = RateFiltersService
+
+    def get(self, request):
+        return Response(self.get_service().get_options())
 
 
 class RateHistoryView(ServiceAPIView):
@@ -69,10 +81,30 @@ class RateHistoryView(ServiceAPIView):
         return paginator.get_paginated_response(RateSerializer(page, many=True).data)
 
 
+class IngestedRatesView(ServiceAPIView):
+    pagination_class = HistoryPagination
+    service_class = IngestedRatesService
+
+    def get(self, request):
+        try:
+            queryset = self.get_service().get_ingested(
+                window_from=request.query_params.get("from"),
+                window_to=request.query_params.get("to"),
+                provider=request.query_params.get("provider"),
+                rate_type=request.query_params.get("type"),
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request)
+        return paginator.get_paginated_response(RateSerializer(page, many=True).data)
+
+
 class IngestRateView(ServiceAPIView):
     """Bearer-authenticated webhook for single-record ingest."""
 
-    authentication_classes = [BearerTokenAuthentication]
+    authentication_classes = [SessionAuthentication, BearerTokenAuthentication]
     permission_classes = [HasBearerToken]
     service_class = IngestionService
 

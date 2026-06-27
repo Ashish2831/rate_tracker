@@ -42,12 +42,10 @@ class RateAdmin(admin.ModelAdmin):
     list_filter = ("rate_type", "currency", IngestedLast24HoursFilter, "raw_response__parse_status")
     search_fields = ("provider__name", "rate_type")
     date_hierarchy = "ingestion_ts"
+    # Avoid rendering 850k+ RawResponse rows in a <select> (OOM on add/edit).
+    autocomplete_fields = ("provider", "raw_response")
+    list_per_page = 50
+    show_full_result_count = False
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("provider", "raw_response")
-
-    @admin.display(description="Parse status", ordering="raw_response__parse_status")
-    def parse_status_via_raw(self, obj):
-        if obj.raw_response_id:
-            return obj.raw_response.parse_status
-        return "—"

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import { LatestRate } from "@/interfaces/rates";
 import { nextSortState, sortRates } from "@/lib/sortRates";
-import { uniqueProviders } from "@/lib/rates";
 
 const sampleRates: LatestRate[] = [
   {
@@ -51,11 +50,5 @@ describe("nextSortState", () => {
       sortKey: "provider",
       sortDir: "asc",
     });
-  });
-});
-
-describe("uniqueProviders", () => {
-  it("returns sorted unique provider names", () => {
-    expect(uniqueProviders(sampleRates)).toEqual(["Chase", "HSBC"]);
   });
 });

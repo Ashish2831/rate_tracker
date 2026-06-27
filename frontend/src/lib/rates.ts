@@ -1,13 +1,14 @@
-/** Derived lists from latest rates for filter/chart dropdowns. */
+/** Derived helpers for dashboard display. */
 
-import { FALLBACK_RATE_TYPES, LatestRate } from "@/interfaces/rates";
+import { LatestRate } from "@/interfaces/rates";
 
-export function uniqueProviders(rates: LatestRate[]): string[] {
-  return Array.from(new Set(rates.map((rate) => rate.provider))).sort();
-}
-
-export function uniqueRateTypes(rates: LatestRate[]): string[] {
-  const fromData = Array.from(new Set(rates.map((rate) => rate.rate_type))).sort();
-  // Show sensible defaults before seed data is loaded.
-  return fromData.length > 0 ? fromData : [...FALLBACK_RATE_TYPES];
+/** Group latest rates by provider for the dashboard overview cards. */
+export function groupRatesByProvider(rates: LatestRate[]): Map<string, LatestRate[]> {
+  const grouped = new Map<string, LatestRate[]>();
+  for (const rate of rates) {
+    const existing = grouped.get(rate.provider) ?? [];
+    existing.push(rate);
+    grouped.set(rate.provider, existing);
+  }
+  return grouped;
 }

@@ -18,11 +18,25 @@ export interface LatestRatesResponse {
   cached: boolean;
 }
 
+export interface RateFiltersResponse {
+  providers: string[];
+  rate_types: string[];
+}
+
 export interface HistoryResponse {
   count: number;
   next: string | null;
   previous: string | null;
   results: HistoryRate[];
+}
+
+export type IngestedRate = HistoryRate;
+
+export interface IngestedRatesResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: IngestedRate[];
 }
 
 /** Chart-friendly point after filtering null rate values. */
