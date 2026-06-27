@@ -1,6 +1,6 @@
 aws_region        = "ap-south-1"
 project_name      = "rate-tracker"
 environment       = "prod"
-github_repository = "YOUR_GITHUB_ORG/Rate_Tracker"
+github_repository = "Ashish2831/rate_tracker"
 domain_name       = ""
 image_tag         = "latest"

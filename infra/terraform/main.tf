@@ -34,6 +34,9 @@ locals {
   name_prefix = "${var.project_name}-${var.environment}"
   azs         = slice(data.aws_availability_zones.available.names, 0, 2)
 
+  # GitHub OIDC expects org/repo — not a full URL (common copy-paste mistake).
+  github_repository = trim(replace(replace(replace(var.github_repository, "https://github.com/", ""), "http://github.com/", ""), ".git", "/"), "/")
+
   app_url = var.domain_name != "" ? "https://${var.domain_name}" : "http://${aws_lb.main.dns_name}"
 
   backend_image  = "${aws_ecr_repository.backend.repository_url}:${var.image_tag}"

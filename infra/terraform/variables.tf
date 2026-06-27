@@ -17,7 +17,7 @@ variable "environment" {
 }
 
 variable "github_repository" {
-  description = "GitHub repo in org/name format for OIDC deploy role trust"
+  description = "GitHub repo in org/name format for OIDC (e.g. Ashish2831/rate_tracker). Full URLs are normalized automatically."
   type        = string
 }
 
