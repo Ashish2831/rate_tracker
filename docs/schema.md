@@ -2,60 +2,35 @@
 
 ## Overview
 
-The schema separates **providers**, **raw ingestion payloads**, and **cleaned rate records**. This supports idempotent re-ingestion, replay of failed parses, and efficient read patterns for the API and dashboard.
+The schema splits **online ingest** (Django) from **warehouse transforms** (dbt). Django writes immutable raw payloads; dbt builds staging → intermediate → mart tables that power the API and dashboard.
 
 ```
-HTTP / Parquet source
+Parquet / webhook
         │
         ▼
-  rates_rawresponse   ← "what we actually received"
+  rates_rawresponse          ← Django bronze (public schema)
+        │
+        ▼  dbt run (after each ingest)
+  staging.stg_raw_responses
         │
         ▼
-    rates_rate        ← "cleaned business record"
-        ▲
+  intermediate.int_rates_parsed
         │
-  rates_provider      ← "who issued the rate"
+        ▼
+  intermediate.int_rates_deduped
+        │
+        ├── analytics.mart_rates         ← history + ingested queries
+        └── analytics.mart_latest_rates  ← GET /latest
+        │
+        ▼
+  Django REST API + Redis cache
 ```
+
+**Key files:** `dbt/models/`, `rates/services/rate_writer.py`, `rates/repositories/rate_repository.py`
 
 ---
 
-## Tables
-
-### `rates_provider`
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | bigint PK | Surrogate key |
-| `name` | varchar(128) UNIQUE | Display name (canonical casing) |
-| `normalized_name` | varchar(128) UNIQUE, indexed | Lowercase key for deduplication |
-| `created_at` | timestamptz | Audit |
-
-**Purpose:** Normalize provider name variants (`hsbc`, `Hsbc`, `HSBC`) into a single entity.
-
-#### Example — provider name normalization
-
-The seed file contains three spellings of the same bank:
-
-| Row in parquet | After ingestion |
-|----------------|-----------------|
-| `provider: "hsbc"` | → `name: "HSBC"`, `normalized_name: "hsbc"` |
-| `provider: "Hsbc"` | → same provider row (lookup by `normalized_name`) |
-| `provider: "HSBC"` | → same provider row |
-
-Without this table, the dashboard would show three separate "providers" for one bank. With it, all rates link to a single `provider_id`.
-
-```
-rates_provider
-┌────┬─────────────────┬─────────────────┐
-│ id │ name            │ normalized_name │
-├────┼─────────────────┼─────────────────┤
-│  1 │ HSBC            │ hsbc            │
-│  2 │ Chase           │ chase           │
-│  3 │ Bank of America │ bank of america │
-└────┴─────────────────┴─────────────────┘
-```
-
----
+## Django-owned table (bronze)
 
 ### `rates_rawresponse`
 
@@ -64,17 +39,17 @@ rates_provider
 | `id` | uuid PK | Internal identifier |
 | `external_id` | varchar(64) UNIQUE, indexed | `raw_response_id` from source — idempotency key |
 | `source_url` | url | Origin of the payload |
-| `raw_body` | jsonb | Full raw payload for replay |
+| `raw_body` | jsonb | Full parquet/webhook row preserved for replay |
 | `fetched_at` | timestamptz, indexed | When data was acquired |
-| `parse_status` | varchar(16) | `success`, `partial`, `failed` |
+| `parse_status` | varchar(16) | `success`, `partial`, `failed` (webhook validation path) |
 | `error_message` | text | Parse/validation errors |
-| `created_at` | timestamptz | Audit |
+| `created_at` | timestamptz, indexed | Incremental watermark for dbt |
 
-**Purpose:** Store raw responses alongside cleaned records so failed parses can be replayed.
+**Purpose:** Immutable bronze layer. Every distinct `external_id` is stored once; re-runs skip duplicates at this layer.
 
-#### Example — successful scrape
+#### Example — parquet row stored as-is
 
-Parquet / HTTP input:
+Parquet input:
 
 ```json
 {
@@ -95,65 +70,72 @@ rates_rawresponse
 ┌─────────────┬──────────────┬────────────────────────────────────┬─────────────────────┐
 │ external_id │ parse_status │ raw_body                           │ fetched_at          │
 ├─────────────┼──────────────┼────────────────────────────────────┼─────────────────────┤
-│ abc-123     │ success      │ { full original JSON preserved }   │ 2025-06-01T12:00:00 │
+│ abc-123     │ success      │ { full original row as JSONB }     │ 2025-06-01T12:00:00 │
 └─────────────┴──────────────┴────────────────────────────────────┴─────────────────────┘
 ```
 
-#### Example — partial parse (invalid rate value)
-
-Parquet row with `rate_value: null`:
-
-```
-rates_rawresponse
-┌─────────────┬──────────────┬─────────────────────────────────────┐
-│ external_id │ parse_status │ error_message                       │
-├─────────────┼──────────────┼─────────────────────────────────────┤
-│ xyz-456     │ partial      │ Invalid or missing rate_value       │
-└─────────────┴──────────────┴─────────────────────────────────────┘
-```
-
-The raw payload is **kept** so an engineer can fix the parser and replay `xyz-456` later without re-scraping the source URL.
+Rows with null or invalid `rate_value` remain in `raw_body`; dbt excludes them from marts (`WHERE rate_value IS NOT NULL`).
 
 ---
 
-### `rates_rate`
+## dbt layers
+
+### `staging.stg_raw_responses` (view)
+
+Pass-through of `rates_rawresponse` — typed columns for downstream models.
+
+### `intermediate.int_rates_parsed` (incremental table)
+
+Extracts and validates fields from `raw_body`:
+
+| Derived column | Source |
+|----------------|--------|
+| `provider_name` | `normalize_provider()` macro on `raw_body->>'provider'` |
+| `normalized_name` | `lower(trim(provider))` |
+| `rate_type`, `rate_value`, `effective_date`, `ingestion_ts`, `currency` | JSON extract + cast |
+| `source_created_at` | `rates_rawresponse.created_at` (incremental watermark) |
+
+Incremental: only rows with `created_at` newer than the model's max watermark.
+
+### `intermediate.int_rates_deduped` (incremental table)
+
+One row per `(normalized_name, rate_type, effective_date)` — keeps the observation with the latest `ingestion_ts`.
+
+~852K parsed rows → ~27K deduplicated business keys (seed data has ~97% duplicate keys).
+
+### `analytics.mart_rates` (incremental table)
 
 | Column | Type | Notes |
 |--------|------|-------|
-| `id` | bigint PK | Surrogate key |
-| `provider_id` | FK → provider | PROTECT on delete |
+| `id` | bigint PK | `hashtext(external_id)` — stable surrogate |
+| `provider_name` | varchar(128) | Canonical display name (e.g. `HSBC`) |
+| `normalized_name` | varchar(128), indexed | Lowercase lookup key (e.g. `hsbc`) |
 | `rate_type` | varchar(64), indexed | e.g. `30yr_fixed_mortgage` |
-| `rate_value` | decimal(8,4), nullable | Null for partial/failed parses |
+| `rate_value` | numeric(8,4) | Non-null only (partial rows excluded) |
 | `effective_date` | date, indexed | Business date of the rate |
 | `ingestion_ts` | timestamptz, indexed | When record was ingested |
 | `currency` | varchar(3) | ISO currency code |
-| `raw_response_id` | FK → rawresponse | PROTECT on delete |
-| `created_at` | timestamptz | Audit |
+| `external_id` | varchar(64) UNIQUE | Lineage back to raw payload |
 
-**Unique constraint:** `(provider_id, rate_type, effective_date, ingestion_ts)` — prevents exact duplicate snapshots while allowing multiple observations per day.
+**Unique key:** `external_id` (incremental merge).
 
-#### Example — unique constraint in practice
+Powers `GET /api/rates/history` and `GET /api/rates/ingested`.
 
-If we used a simpler constraint `UNIQUE (provider_id, rate_type, effective_date)`, only one row per day would be allowed and re-scrape history would be lost. The four-column constraint is more precise:
+### `analytics.mart_latest_rates` (table, rebuilt each dbt run)
 
-**Allowed — multiple observations on the same effective date:**
+Same columns as `mart_rates` (except `source_created_at`), one row per `(normalized_name, rate_type)` — latest `effective_date` then `ingestion_ts`.
 
-```
-Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 08:00 | 6.50  ✅
-Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 14:30 | 6.55  ✅
-Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48  ✅
-```
+Powers `GET /api/rates/latest` and filter dropdowns.
 
-Same bank, same product, same effective date — but scraped at different times → different snapshots.
+#### Example — provider name normalization (in dbt, not Django)
 
-**Blocked — exact duplicate snapshot (idempotent re-run):**
+| Row in parquet `raw_body` | `provider_name` | `normalized_name` |
+|---------------------------|-------------------|-------------------|
+| `"hsbc"` | HSBC | hsbc |
+| `"Hsbc"` | HSBC | hsbc |
+| `"HSBC"` | HSBC | hsbc |
 
-```
-Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 08:00 | 6.50  ✅ first insert
-Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 08:00 | 6.50  ❌ rejected on re-run
-```
-
-When the API asks for the latest rate, it picks the best snapshot with `ORDER BY effective_date DESC, ingestion_ts DESC`. In the example above, `6.48` (ingested 2025-05-16) wins for the 2025-05-15 effective date.
+All three raw payloads may exist in bronze; dedupe keeps the latest observation per business key in the mart.
 
 ---
 
@@ -164,12 +146,13 @@ When the API asks for the latest rate, it picks the best snapshot with `ORDER BY
 **Question:** "What is each bank's most recent rate right now?"
 
 ```sql
--- Supported by composite index: (provider_id, rate_type, effective_date DESC)
-SELECT DISTINCT ON (provider_id, rate_type) *
-FROM rates_rate
-WHERE rate_value IS NOT NULL
-ORDER BY provider_id, rate_type, effective_date DESC, ingestion_ts DESC;
+-- Pre-computed in analytics.mart_latest_rates (~50 rows)
+SELECT provider_name, rate_type, rate_value, effective_date, ingestion_ts, currency
+FROM analytics.mart_latest_rates
+ORDER BY provider_name, rate_type;
 ```
+
+Django reads via `MartLatestRate` ORM (unmanaged model). Redis cache-aside (60s TTL) wraps this path.
 
 **Example result** (powers `GET /api/rates/latest`):
 
@@ -186,13 +169,12 @@ ORDER BY provider_id, rate_type, effective_date DESC, ingestion_ts DESC;
 **Question:** "How did Chase's 30-year fixed rate move this month?"
 
 ```sql
--- Supported by index: (provider_id, rate_type, effective_date)
-SELECT *
-FROM rates_rate
-WHERE provider_id = 2          -- Chase
+SELECT provider_name, rate_type, rate_value, effective_date, ingestion_ts
+FROM analytics.mart_rates
+WHERE normalized_name = 'chase'
   AND rate_type = '30yr_fixed_mortgage'
   AND effective_date >= CURRENT_DATE - INTERVAL '30 days'
-ORDER BY effective_date;
+ORDER BY effective_date, ingestion_ts;
 ```
 
 **Example result** (powers the frontend line chart via `GET /api/rates/history`):
@@ -211,14 +193,33 @@ ORDER BY effective_date;
 **Question:** "What did our ingestion pipeline load between midnight and midnight yesterday?"
 
 ```sql
--- Supported by index: (ingestion_ts)
-SELECT *
-FROM rates_rate
+SELECT provider_name, rate_type, rate_value, effective_date, ingestion_ts
+FROM analytics.mart_rates
 WHERE ingestion_ts >= '2025-06-01 00:00:00'
-  AND ingestion_ts <  '2025-06-02 00:00:00';
+  AND ingestion_ts <  '2025-06-02 00:00:00'
+ORDER BY ingestion_ts DESC;
 ```
 
-**Example use:** Ops/debugging — verifying that last night's Celery job ingested data as expected.
+**Example use:** Ops/debugging — verifying that last night's Celery job ingested data as expected. Powers `GET /api/rates/ingested`.
+
+---
+
+## Incremental dbt refresh
+
+| Run type | When | Typical duration |
+|----------|------|------------------|
+| Full refresh (`--full-refresh`) | First seed / `make dbt-full` | ~5s on seed data |
+| Incremental | Celery re-run, webhook ingest | ~0.6s when no new raw rows |
+
+Watermark: `rates_rawresponse.created_at` → `int_rates_parsed.source_created_at`.
+
+Commands:
+
+```bash
+make seed       # raw load + dbt (auto full-refresh if marts missing)
+make dbt        # incremental refresh
+make dbt-full   # rebuild all incremental models
+```
 
 ---
 
@@ -226,11 +227,14 @@ WHERE ingestion_ts >= '2025-06-01 00:00:00'
 
 | Decision | Rationale | Example |
 |----------|-----------|---------|
-| Separate `Provider` table | Enables name normalization without mutating historical rows | `"hsbc"`, `"Hsbc"`, `"HSBC"` all map to one row; old `rates_rate` rows keep `provider_id=1` unchanged |
-| `external_id` uniqueness on raw responses | Guarantees idempotent ingestion at the payload level | Row with `raw_response_id: "abc-123"` is inserted once; second ingest of the same ID is skipped |
-| Nullable `rate_value` | Preserves partial records for observability/replay | Row with null rate stored (`rate_value = NULL`, `parse_status = partial`) but excluded from API reads |
-| Composite unique on rate snapshots | Handles duplicate business keys in seed data by keeping distinct ingestion timestamps | ~972K seed rows share `(provider, rate_type, effective_date)`; distinct `ingestion_ts` values preserve scrape history |
-| JSONB for `raw_body` | Flexible storage for varying source formats; supports replay | Chase returns JSON today; another bank may return a different structure tomorrow — JSONB stores both without schema changes |
+| Raw-only Django ingest | Keeps online path simple; transforms versioned in SQL | Webhook writes one `rates_rawresponse` row, dbt builds marts |
+| dbt for transforms | Staging/int/mart layering, incremental models, schema tests | Provider normalize + dedupe in `int_rates_*` models |
+| Provider columns on mart (not separate table) | Normalization in SQL macro; no Django FK wiring | `"hsbc"`, `"Hsbc"`, `"HSBC"` → `provider_name: HSBC` |
+| `external_id` uniqueness on raw | Idempotent ingest at payload level | `raw_response_id: "abc-123"` inserted once; re-run skipped |
+| Dedupe in dbt, not Python | All raw rows preserved; business logic in one SQL layer | ~852K raw → ~27K mart rows after dedupe |
+| Exclude null `rate_value` from marts | Partial rows stay in bronze for replay | Null rate in raw_body → not in `mart_rates` |
+| `mart_latest_rates` table rebuild | Only ~50 rows; simpler than incremental latest logic | `/latest` is O(1) per row on cache miss |
+| JSONB for `raw_body` | Flexible storage; supports replay without re-scrape | Full parquet row preserved regardless of parse outcome |
 
 ---
 
@@ -240,16 +244,19 @@ WHERE ingestion_ts >= '2025-06-01 00:00:00'
 Parquet input:
   { provider: "hsbc", rate_value: 4.76, raw_response_id: "8868d928-...", ... }
 
-Step 1 — rates_provider
-  → lookup normalized_name "hsbc" → create/find Provider(name="HSBC")
+Step 1 — Django: rates_rawresponse
+  → insert external_id="8868d928-...", raw_body={ full row }, parse_status="success"
 
-Step 2 — rates_rawresponse
-  → insert external_id="8868d928-...", parse_status="success", raw_body={...}
+Step 2 — dbt: int_rates_parsed
+  → extract fields, provider_name="HSBC", normalized_name="hsbc"
 
-Step 3 — rates_rate
-  → insert provider_id=1, rate_type="savings_1yr_fixed", rate_value=4.76, ...
+Step 3 — dbt: int_rates_deduped
+  → keep latest row per (hsbc, rate_type, effective_date)
 
-Step 4 — API
+Step 4 — dbt: analytics.mart_rates + mart_latest_rates
+  → rate_value=4.76 available for API reads
+
+Step 5 — API
   → GET /api/rates/latest includes HSBC row
   → GET /api/rates/history?provider=HSBC&type=savings_1yr_fixed returns time series
 ```
@@ -257,7 +264,13 @@ Step 4 — API
 If the same row is ingested again:
 
 ```
-Step 2 — rates_rawresponse → external_id already exists → skipped
-Step 3 — rates_rate       → no new row created
+Step 1 — rates_rawresponse → external_id already exists → skipped
+Step 2–4 — dbt incremental → no new source_created_at → MERGE 0 rows
 Stats: skipped_duplicates += 1
 ```
+
+---
+
+## Legacy note
+
+Earlier iterations used Django-owned `rates_provider` and `rates_rate` tables. These were removed in migration `0002_drop_legacy_transform_tables` — all transform logic now lives in dbt marts under the `analytics` schema.

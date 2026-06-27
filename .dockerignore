@@ -1,0 +1,17 @@
+# Backend image build context (docker build -f backend/Dockerfile .)
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/node_modules
+frontend/
+infra/
+docs/
+*.md
+.env
+.env.*
+backend/celerybeat-schedule
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/

@@ -1,57 +1,55 @@
-"""Django admin registrations for debugging and data inspection."""
+"""Django admin — raw bronze layer and dbt mart inspection (read-only)."""
 
 from django.contrib import admin
-from django.utils import timezone
 
-from rates.models import Provider, Rate, RawResponse
-
-
-@admin.register(Provider)
-class ProviderAdmin(admin.ModelAdmin):
-    """Browse canonical provider names and normalized lookup keys."""
-
-    list_display = ("name", "normalized_name", "created_at")
-    search_fields = ("name", "normalized_name")
+from rates.models import MartLatestRate, MartRate, RawResponse
 
 
 @admin.register(RawResponse)
 class RawResponseAdmin(admin.ModelAdmin):
     """Inspect immutable scrape payloads and parse outcomes."""
 
-    list_display = ("external_id", "source_url", "parse_status", "fetched_at")
+    list_display = ("external_id", "source_url", "parse_status", "fetched_at", "created_at")
     list_filter = ("parse_status",)
     search_fields = ("external_id", "source_url")
     date_hierarchy = "fetched_at"
 
 
-class IngestedLast24HoursFilter(admin.SimpleListFilter):
-    """Schema.md query pattern #3 — rates ingested in the last 24 hours."""
+@admin.register(MartRate)
+class MartRateAdmin(admin.ModelAdmin):
+    """dbt mart_rates — read-only inspection of transformed facts."""
 
-    title = "ingestion window"
-    parameter_name = "last_24h"
-
-    def lookups(self, request, model_admin):
-        return (("yes", "Last 24 hours"),)
-
-    def queryset(self, request, queryset):
-        if self.value() == "yes":
-            cutoff = timezone.now() - timezone.timedelta(hours=24)
-            return queryset.filter(ingestion_ts__gte=cutoff)
-        return queryset
-
-
-@admin.register(Rate)
-class RateAdmin(admin.ModelAdmin):
-    """Query rate snapshots — supports schema.md pattern #3 (last 24h filter)."""
-
-    list_display = ("provider", "rate_type", "rate_value", "effective_date", "ingestion_ts")
-    list_filter = ("rate_type", "currency", IngestedLast24HoursFilter, "raw_response__parse_status")
-    search_fields = ("provider__name", "rate_type")
+    list_display = ("provider_name", "rate_type", "rate_value", "effective_date", "ingestion_ts")
+    list_filter = ("rate_type", "currency")
+    search_fields = ("provider_name", "rate_type", "external_id")
     date_hierarchy = "ingestion_ts"
-    # Avoid rendering 850k+ RawResponse rows in a <select> (OOM on add/edit).
-    autocomplete_fields = ("provider", "raw_response")
     list_per_page = 50
     show_full_result_count = False
 
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related("provider", "raw_response")
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MartLatestRate)
+class MartLatestRateAdmin(admin.ModelAdmin):
+    """dbt mart_latest_rates — read-only latest snapshot per provider/type."""
+
+    list_display = ("provider_name", "rate_type", "rate_value", "effective_date", "ingestion_ts")
+    list_filter = ("rate_type",)
+    search_fields = ("provider_name", "rate_type")
+    list_per_page = 50
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

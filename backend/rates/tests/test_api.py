@@ -5,11 +5,10 @@ from decimal import Decimal
 
 import pytest
 from django.core.cache import cache
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from rates.models import Provider, Rate, RawResponse
+from rates.tests.mart_helpers import insert_sample_mart_rate
 
 
 @pytest.fixture
@@ -19,23 +18,8 @@ def api_client():
 
 @pytest.fixture
 def sample_rate(db):
-    provider = Provider.objects.create(name="Chase", normalized_name="chase")
-    raw = RawResponse.objects.create(
-        external_id="api-test-001",
-        source_url="https://chase.com/rates",
-        raw_body={"provider": "Chase"},
-        fetched_at=timezone.now(),
-        parse_status="success",
-    )
-    return Rate.objects.create(
-        provider=provider,
-        rate_type="30yr_fixed_mortgage",
-        rate_value=Decimal("6.5000"),
-        effective_date=date.today(),
-        ingestion_ts=timezone.now(),
-        currency="USD",
-        raw_response=raw,
-    )
+    insert_sample_mart_rate()
+    return True
 
 
 @pytest.mark.django_db
@@ -103,6 +87,11 @@ def test_history_endpoint_paginated(api_client, sample_rate):
 
 @pytest.mark.django_db
 def test_history_endpoint_respects_page_size(api_client, sample_rate):
+    insert_sample_mart_rate(
+        external_id="mart-test-002",
+        row_id=2,
+        rate_value=Decimal("6.7500"),
+    )
     response = api_client.get(
         "/api/rates/history",
         {"provider": "Chase", "type": "30yr_fixed_mortgage", "page_size": "1"},
@@ -132,8 +121,9 @@ def test_ingested_rates_filters_by_provider(api_client, sample_rate):
 
 
 @pytest.mark.django_db
-def test_ingest_with_staff_session(api_client, settings):
+def test_ingest_with_staff_session(api_client, settings, mocker):
     cache.clear()
+    mocker.patch("rates.services.ingestion.DbtRunner.run_marts")
     from django.contrib.auth import get_user_model
 
     user = get_user_model().objects.create_superuser("apiadmin", "admin@test.com", "testpass123")
@@ -151,7 +141,8 @@ def test_ingest_with_staff_session(api_client, settings):
     )
 
     assert response.status_code == status.HTTP_201_CREATED
-    assert response.data["rate_type"] == "savings_easy_access"
+    assert response.data["external_id"] == "session-ingest-001"
+    assert response.data["parse_status"] == "success"
 
 
 @pytest.mark.django_db
@@ -170,8 +161,9 @@ def test_ingest_requires_auth(api_client):
 
 
 @pytest.mark.django_db
-def test_ingest_with_valid_token(api_client, settings):
+def test_ingest_with_valid_token(api_client, settings, mocker):
     cache.clear()
+    mocker.patch("rates.services.ingestion.DbtRunner.run_marts")
     response = api_client.post(
         "/api/rates/ingest",
         {
@@ -186,7 +178,7 @@ def test_ingest_with_valid_token(api_client, settings):
     )
 
     assert response.status_code == status.HTTP_201_CREATED
-    assert response.data["rate_type"] == "savings_easy_access"
+    assert response.data["external_id"] == "webhook-test-001"
 
 
 @pytest.mark.django_db

@@ -68,12 +68,14 @@ def validate_rate_value(value: Any) -> Decimal | None:
     return decimal_value
 
 
-def _json_safe(value: Any) -> Any:
+def json_safe_value(value: Any) -> Any:
     """Ensure values stored in RawResponse.raw_body are JSON-serializable."""
     if isinstance(value, Decimal):
         return str(value) if value.is_finite() else None
     if isinstance(value, float) and math.isnan(value):
         return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
     return value
 
 
@@ -82,7 +84,7 @@ def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider": record.get("provider"),
         "rate_type": record.get("rate_type"),
-        "rate_value": _json_safe(record.get("rate_value")),
+        "rate_value": json_safe_value(record.get("rate_value")),
         "effective_date": str(record.get("effective_date")),
         "ingestion_ts": str(record.get("ingestion_ts")),
         "currency": record.get("currency"),
@@ -91,7 +93,7 @@ def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_rate_record(record: dict[str, Any]) -> ParsedRate | None:
-    """Core parser — shared by parquet, webhook, and scrape paths."""
+    """Core parser — webhook validation and HTTP scrape adapter."""
     provider = record.get("provider")
     if not provider:
         return None

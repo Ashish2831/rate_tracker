@@ -22,6 +22,12 @@ logs:
 seed:
 	docker compose exec backend python manage.py seed_data
 
+dbt:
+	docker compose exec backend python manage.py run_dbt
+
+dbt-full:
+	docker compose exec backend python manage.py run_dbt --full-refresh
+
 test: test-backend test-frontend
 
 test-backend:

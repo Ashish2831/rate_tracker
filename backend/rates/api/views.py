@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from rates.api.authentication import BearerTokenAuthentication
 from rates.api.pagination import PaginatedRateListMixin
 from rates.api.permissions import HasBearerToken
-from rates.api.serializers import IngestRateSerializer, RateSerializer
+from rates.api.serializers import IngestRateSerializer, RawResponseSerializer
 from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
 from rates.services.ingestion import IngestionService
 from rates.services.ingested_rates_service import IngestedRatesService
@@ -112,7 +112,7 @@ class IngestRateView(ServiceAPIView):
         payload.setdefault("ingestion_ts", timezone.now())
 
         try:
-            rate = self.get_service().ingest_from_api_payload(payload)
+            raw = self.get_service().ingest_from_api_payload(payload)
         except DuplicateRateError as exc:
             # Idempotent re-post returns 200, not an error.
             return Response({"message": str(exc), "status": "duplicate"}, status=status.HTTP_200_OK)
@@ -123,8 +123,8 @@ class IngestRateView(ServiceAPIView):
             "Webhook ingest succeeded",
             extra={
                 "event": "webhook_ingest",
-                "provider": rate.provider.name,
-                "rate_type": rate.rate_type,
+                "external_id": raw.external_id,
+                "parse_status": raw.parse_status,
             },
         )
-        return Response(RateSerializer(rate).data, status=status.HTTP_201_CREATED)
+        return Response(RawResponseSerializer(raw).data, status=status.HTTP_201_CREATED)

@@ -18,9 +18,19 @@ def test_write_stats_as_dict():
         "inserted_rates": 5,
         "skipped_duplicates": 0,
         "invalid_records": 0,
-        "partial_records": 0,
-        "failed_records": 0,
     }
+
+
+def test_coerce_fetched_at_makes_naive_datetime_aware():
+    from datetime import datetime
+
+    from rates.services.rate_writer import _coerce_fetched_at
+
+    naive = datetime(2025, 6, 1, 12, 0, 0)
+    aware = _coerce_fetched_at(naive)
+
+    assert aware is not None
+    assert aware.tzinfo is not None
 
 
 def test_ingest_api_payload_raises_invalid_payload():
@@ -126,6 +136,23 @@ def test_http_rate_source_yields_parsed_record(mocker):
     batches = list(source.iter_batches())
     assert len(batches) == 1
     assert batches[0][0]["provider"] == "Chase"
+
+
+def test_http_rate_source_raises_on_unparseable_payload(mocker):
+    from rates.services.sources import HttpRateSource
+
+    mocker.patch(
+        "rates.services.sources.fetch_rate_source",
+        return_value={
+            "source_url": "https://example.com/rates.json",
+            "status_code": 200,
+            "body": {"raw_text": "not json"},
+        },
+    )
+    source = HttpRateSource("https://example.com/rates.json")
+
+    with pytest.raises(InvalidIngestPayloadError, match="Could not parse rate record"):
+        list(source.iter_batches())
 
 
 def test_create_rate_source_unsupported():

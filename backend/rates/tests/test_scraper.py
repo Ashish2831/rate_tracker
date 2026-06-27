@@ -1,14 +1,11 @@
 """Unit tests for HTTP scrape transport and payload parsing."""
 
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
 from rates.services.parser import parse_scrape_payload
 from rates.services.scraper import fetch_rate_source
-
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -36,6 +33,11 @@ def test_parse_scrape_payload_matches_fixture(sample_http_response):
     assert parsed.rate_type == "30yr_fixed_mortgage"
     assert parsed.rate_value == Decimal("6.75")
     assert parsed.external_id == "test-response-001"
+
+
+def test_parse_scrape_payload_returns_none_for_non_dict_body():
+    assert parse_scrape_payload({"source_url": "https://example.com", "body": "plain text"}) is None
+    assert parse_scrape_payload({"source_url": "https://example.com", "body": {"raw_text": "html"}}) is None
 
 
 def test_fetch_rate_source_success(mocker, sample_http_response):

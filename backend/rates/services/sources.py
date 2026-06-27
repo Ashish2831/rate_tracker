@@ -1,11 +1,15 @@
 """Strategy pattern — pluggable rate record sources (parquet, HTTP URL, future CSV)."""
 
+import logging
 from typing import Any, Iterator, Protocol
 
 import pyarrow.parquet as pq
 
+from rates.services.exceptions import InvalidIngestPayloadError
 from rates.services.parser import parse_scrape_payload
 from rates.services.scraper import fetch_rate_source
+
+logger = logging.getLogger("rates.sources")
 
 BATCH_SIZE = 10000
 
@@ -18,7 +22,7 @@ class RateRecordSource(Protocol):
 
 
 class ParquetRateSource:
-    """Concrete strategy — reads Snappy-compressed parquet in deduplicated batches."""
+    """Concrete strategy — streams Snappy-compressed parquet batches (no Python dedupe)."""
 
     def __init__(self, path: str, batch_size: int = BATCH_SIZE):
         self.path = path
@@ -28,13 +32,7 @@ class ParquetRateSource:
         parquet_file = pq.ParquetFile(self.path)
         for batch in parquet_file.iter_batches(batch_size=self.batch_size):
             df = batch.to_pandas()
-            # ~97% of seed rows share a business key; keep the latest observation.
-            # Sort the dataframe by ingestion timestamp and drop duplicates based on provider, rate type, and effective date
-            df = df.sort_values("ingestion_ts").drop_duplicates(
-                subset=["provider", "rate_type", "effective_date"],
-                keep="last",
-            )
-            yield df.to_dict(orient="records") # Convert the dataframe to a list of dictionaries
+            yield df.to_dict(orient="records")
 
 
 class HttpRateSource:
@@ -47,19 +45,21 @@ class HttpRateSource:
         response = fetch_rate_source(self.url)
         parsed = parse_scrape_payload(response)
         if not parsed:
-            return
-        yield [
-            {
-                "provider": parsed.provider_name,
-                "rate_type": parsed.rate_type,
-                "rate_value": parsed.rate_value,
-                "effective_date": parsed.effective_date,
-                "ingestion_ts": parsed.ingestion_ts,
-                "currency": parsed.currency,
-                "source_url": parsed.source_url or self.url,
-                "raw_response_id": parsed.external_id,
-            }
-        ]
+            logger.error(
+                "HTTP scrape payload could not be parsed into a rate record",
+                extra={
+                    "event": "http_parse_failed",
+                    "url": self.url,
+                    "status_code": response.get("status_code"),
+                },
+            )
+            raise InvalidIngestPayloadError(
+                f"Could not parse rate record from HTTP response at {self.url}"
+            )
+        record = parsed.to_source_dict()
+        if not record.get("source_url"):
+            record["source_url"] = self.url
+        yield [record]
 
 
 def create_rate_source(path: str) -> RateRecordSource:

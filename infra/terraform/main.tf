@@ -53,6 +53,9 @@ locals {
     { name = "CORS_ALLOWED_ORIGINS", value = local.app_url },
     { name = "SEED_PARQUET_PATH", value = "/data/rates_seed.parquet" },
     { name = "SEED_S3_URI", value = "s3://${aws_s3_bucket.seed.id}/${var.seed_object_key}" },
+    { name = "DBT_PROJECT_DIR", value = "/dbt" },
+    { name = "DBT_PROFILES_DIR", value = "/dbt" },
+    { name = "DBT_RUN_AFTER_INGEST", value = "true" },
     { name = "SLOW_QUERY_THRESHOLD_MS", value = "200" },
     { name = "LOG_LEVEL", value = "INFO" },
   ]

@@ -161,6 +161,9 @@ SEED_PARQUET_PATH = os.getenv(
     "SEED_PARQUET_PATH",
     str(BASE_DIR.parent / "data" / "rates_seed.parquet"),
 )
+DBT_PROJECT_DIR = os.getenv("DBT_PROJECT_DIR", str(BASE_DIR.parent / "dbt"))
+DBT_PROFILES_DIR = os.getenv("DBT_PROFILES_DIR", DBT_PROJECT_DIR)
+DBT_RUN_AFTER_INGEST = os.getenv("DBT_RUN_AFTER_INGEST", "true").lower() == "true"
 SLOW_QUERY_THRESHOLD_MS = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "200"))
 
 # Celery shares Redis with Django cache (see docker-compose.yml).

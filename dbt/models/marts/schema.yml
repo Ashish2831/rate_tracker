@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: stg_raw_responses
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+
+  - name: int_rates_parsed
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+
+  - name: int_rates_deduped
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+
+  - name: mart_rates
+    columns:
+      - name: external_id
+        tests:
+          - unique
+          - not_null
+      - name: rate_value
+        tests:
+          - not_null
+
+  - name: mart_latest_rates
+    columns:
+      - name: normalized_name
+        tests:
+          - not_null
+      - name: rate_type
+        tests:
+          - not_null

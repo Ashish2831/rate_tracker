@@ -25,12 +25,14 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --reload
     env_file: .env
     volumes:
       - ./backend:/app
       - ./data:/data
+      - ./dbt:/dbt
     ports:
       - "8000:8000"
     depends_on:
@@ -41,12 +43,14 @@ services:
 
   celery-worker:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     command: celery -A config worker --loglevel=info
     env_file: .env
     volumes:
       - ./backend:/app
       - ./data:/data
+      - ./dbt:/dbt
     depends_on:
       backend:
         condition: service_started
@@ -55,12 +59,14 @@ services:
 
   celery-beat:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     command: celery -A config beat --loglevel=info
     env_file: .env
     volumes:
       - ./backend:/app
       - ./data:/data
+      - ./dbt:/dbt
     depends_on:
       backend:
         condition: service_started

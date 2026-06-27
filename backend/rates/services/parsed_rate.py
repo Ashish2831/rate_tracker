@@ -8,7 +8,7 @@ from typing import Any
 
 @dataclass
 class ParsedRate:
-    """Normalized record flowing from parser → RateWriter (Value Object)."""
+    """Normalized record flowing from parser → RateWriter (webhook path)."""
 
     external_id: str  # Maps to RawResponse.external_id for idempotent ingest
     provider_name: str
@@ -23,9 +23,18 @@ class ParsedRate:
     error_message: str
 
     @property
-    def is_partial(self) -> bool:
-        return self.parse_status == "partial"
-
-    @property
     def is_failed(self) -> bool:
         return self.parse_status == "failed"
+
+    def to_source_dict(self) -> dict[str, Any]:
+        """Shape expected by bulk raw ingest (HTTP adapter → ParquetRateSource path)."""
+        return {
+            "provider": self.provider_name,
+            "rate_type": self.rate_type,
+            "rate_value": self.rate_value,
+            "effective_date": self.effective_date,
+            "ingestion_ts": self.ingestion_ts,
+            "currency": self.currency,
+            "source_url": self.source_url,
+            "raw_response_id": self.external_id,
+        }

@@ -20,7 +20,9 @@ aws ecr get-login-password --region "${AWS_REGION}" | \
   docker login --username AWS --password-stdin "${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 echo "Building backend -> ${BACKEND}:${IMAGE_TAG}"
-docker build --platform "${DOCKER_PLATFORM}" -t "${BACKEND}:${IMAGE_TAG}" "${ROOT}/backend"
+docker build --platform "${DOCKER_PLATFORM}" \
+  -f "${ROOT}/backend/Dockerfile" \
+  -t "${BACKEND}:${IMAGE_TAG}" "${ROOT}"
 docker push "${BACKEND}:${IMAGE_TAG}"
 
 echo "Building frontend -> ${FRONTEND}:${IMAGE_TAG}"

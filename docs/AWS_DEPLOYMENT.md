@@ -171,6 +171,10 @@ API health: `http://<alb-dns>/api/health/`
 
 ## Operations
 
+### dbt in production
+
+The backend Docker image includes the `dbt/` project at `/dbt`. ECS backend and Celery tasks set `DBT_PROJECT_DIR=/dbt`, `DBT_PROFILES_DIR=/dbt`, and `DBT_RUN_AFTER_INGEST=true`, so `seed_data` and webhook ingest refresh analytics marts automatically.
+
 ### View logs
 
 ```bash

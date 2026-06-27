@@ -58,6 +58,9 @@ jobs:
           POSTGRES_HOST: localhost
           REDIS_URL: redis://localhost:6379/1
           INGEST_BEARER_TOKEN: ci-test-token
+          DBT_PROJECT_DIR: ${{ github.workspace }}/dbt
+          DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+          DBT_RUN_AFTER_INGEST: "false"
         run: python manage.py migrate --noinput
 
       - name: Pytest
@@ -69,6 +72,9 @@ jobs:
           POSTGRES_HOST: localhost
           REDIS_URL: redis://localhost:6379/1
           INGEST_BEARER_TOKEN: ci-test-token
+          DBT_PROJECT_DIR: ${{ github.workspace }}/dbt
+          DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+          DBT_RUN_AFTER_INGEST: "false"
         run: pytest
 
   frontend:

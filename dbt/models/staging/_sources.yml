@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: rates
+    description: Django-owned bronze layer — immutable scrape payloads
+    schema: public
+    tables:
+      - name: raw_responses
+        identifier: rates_rawresponse
+        description: Full parquet/webhook payloads keyed by external_id

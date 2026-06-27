@@ -1,14 +1,16 @@
-"""Ingestion orchestrator — coordinates source iteration, persistence, and cache invalidation."""
+"""Ingestion orchestrator — raw load in Django, transforms via dbt, cache invalidation."""
 
 import logging
 import uuid
 from typing import Any, Callable
 
-from django.db import transaction
+from django.conf import settings
+from django.db import connection, transaction
 
-from rates.models import Rate
+from rates.models import RawResponse
 from rates.services.cache import invalidate_rate_caches
-from rates.services.exceptions import DuplicateRateError
+from rates.services.dbt_runner import DbtRunError, DbtRunner
+from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
 from rates.services.parser import parsed_from_ingest
 from rates.services.rate_writer import RateWriter, WriteStats
 from rates.services.sources import RateRecordSource, create_rate_source
@@ -17,7 +19,7 @@ logger = logging.getLogger("rates.ingestion")
 
 
 class IngestionService:
-    """Orchestrator — coordinates source iteration, writing, logging, and cache invalidation (SRP)."""
+    """Orchestrator — raw ingest, dbt mart refresh, logging, cache invalidation."""
 
     def __init__(
         self,
@@ -25,11 +27,13 @@ class IngestionService:
         writer: RateWriter | None = None,
         source_factory: Callable[[str], RateRecordSource] | None = None,
         cache_invalidator: Callable[[], None] | None = None,
+        dbt_runner: DbtRunner | None = None,
     ):
         self.job_id = job_id or str(uuid.uuid4())
         self.writer = writer or RateWriter()
         self._source_factory = source_factory or create_rate_source
         self._invalidate_caches = cache_invalidator or invalidate_rate_caches
+        self._dbt_runner = dbt_runner or DbtRunner()
         self.stats = WriteStats()
 
     def log_start(self, source: str) -> None:
@@ -50,11 +54,30 @@ class IngestionService:
             extra={"event": "ingestion_error", "job_id": self.job_id, "error": error},
         )
 
+    def _marts_exist(self) -> bool:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT to_regclass('analytics.mart_latest_rates') IS NOT NULL")
+            return bool(cursor.fetchone()[0])
+
+    def _refresh_marts(self) -> None:
+        if not settings.DBT_RUN_AFTER_INGEST:
+            return
+        full_refresh = not self._marts_exist()
+        try:
+            self._dbt_runner.run_marts(full_refresh=full_refresh)
+        except DbtRunError as exc:
+            logger.error(
+                "dbt mart refresh failed after ingest",
+                extra={"event": "dbt_refresh_error", "job_id": self.job_id, "error": str(exc)},
+            )
+            raise
+
     def ingest_from_source(self, source: RateRecordSource) -> dict[str, int]:
-        """Iterate source batches inside transactions; invalidate cache once at the end."""
+        """Iterate source batches inside transactions; dbt refresh + cache bust at end."""
         for batch in source.iter_batches():
             with transaction.atomic():
                 self.writer.bulk_persist(batch, self.stats)
+        self._refresh_marts()
         self._invalidate_caches()
         return self.stats.as_dict()
 
@@ -74,12 +97,13 @@ class IngestionService:
         """Backward-compatible alias for ingest_from_path."""
         return self.ingest_from_path(path)
 
-    def ingest_from_api_payload(self, payload: dict[str, Any]) -> Rate:
-        """Webhook path — single record, raises DuplicateRateError on idempotent re-post."""
+    def ingest_from_api_payload(self, payload: dict[str, Any]) -> RawResponse:
+        """Webhook path — validate, persist raw, refresh marts, raise on duplicate."""
         parsed = parsed_from_ingest(payload)
-        rate = self.writer.persist_one(parsed, self.stats)
-        if not rate:
+        raw = self.writer.persist_one(parsed, self.stats)
+        if not raw:
             raise DuplicateRateError("Duplicate record — idempotent no-op")
 
+        self._refresh_marts()
         self._invalidate_caches()
-        return rate
+        return raw

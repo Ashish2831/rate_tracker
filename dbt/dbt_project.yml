@@ -1,0 +1,31 @@
+name: rate_tracker
+version: 1.0.0
+config-version: 2
+profile: rate_tracker
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  rate_tracker:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +schema: intermediate
+      int_rates_parsed:
+        +materialized: incremental
+      int_rates_deduped:
+        +materialized: incremental
+    marts:
+      +schema: analytics
+      +tags: ["rates_marts"]
+      mart_rates:
+        +materialized: incremental
+      mart_latest_rates:
+        +materialized: table

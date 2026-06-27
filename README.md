@@ -78,7 +78,7 @@ make test-backend
 make test-frontend
 ```
 
-Without Docker, unit tests only (21 backend + 14 frontend — API tests need Postgres):
+Without Docker, unit tests only (25 backend + 20 frontend — API tests need Postgres):
 
 ```bash
 cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py rates/tests/test_scraper.py
@@ -89,8 +89,6 @@ cd frontend && npm test
 
 ```bash
 make logs
-# or
-./scripts/logs.sh
 ```
 
 ### Makefile commands
@@ -101,7 +99,8 @@ make logs
 | `make up-lite` | Postgres, Redis, backend, frontend only (no Celery) |
 | `make down` | Stop containers |
 | `make build` | Rebuild Docker images |
-| `make seed` | Load parquet seed data |
+| `make seed` | Load parquet into raw tables + run dbt marts |
+| `make dbt` | Re-run dbt mart models only |
 | `make test` | Run backend pytest + frontend Vitest |
 | `make test-backend` | Backend pytest only (in Docker) |
 | `make test-frontend` | Frontend Vitest only (in Docker) |
@@ -143,20 +142,22 @@ curl -X POST http://localhost:8000/api/rates/ingest \
 ## Architecture
 
 ```
-rates_seed.parquet
+Parquet / webhook
        │
        ▼
-  seed_data / Celery worker
+  Django ingest (raw-only) ──► rates_rawresponse  (bronze)
        │
        ▼
- PostgreSQL ◄── RawResponse + Rate tables
+  dbt run (stg → int → mart) ──► analytics.mart_rates / mart_latest_rates
        │
        ▼
- Django REST API ◄── Redis cache
+ Django REST API ◄── Redis cache (reads marts)
        │
        ▼
  Next.js Dashboard (auto-refresh 60s)
 ```
+
+`make seed` loads parquet into raw tables and runs dbt automatically. Manual refresh: `make dbt`.
 
 See [docs/SCHEMA.md](./docs/SCHEMA.md) for database design and [docs/DECISIONS.md](./docs/DECISIONS.md) for engineering rationale and SOLID/design-pattern notes.
 
@@ -173,12 +174,14 @@ API Views (HTTP only)
     ├── IngestionService         → RateWriter + RateRecordSource (Strategy)
     └── pagination.py            → shared history/ingested pagination (PaginatedRateListMixin)
 
-RateWriter (persist)  →  ProviderResolver + ORM
-ParquetRateSource     →  implements RateRecordSource (Open/Closed)
-HttpRateSource        →  live HTTP JSON ingest via scraper + adapter
-create_rate_source()  →  Factory Method for source selection
-parsed_rate.py        →  ParsedRate value object (parser → writer)
-parser.py             →  parse_scrape_payload() maps HTTP body → record (Adapter)
+RateWriter (raw persist)  →  rates_rawresponse only
+DbtRunner               →  stg/int/mart SQL transforms after ingest
+ParquetRateSource       →  implements RateRecordSource (Open/Closed)
+HttpRateSource          →  live HTTP JSON ingest via scraper + adapter
+create_rate_source()    →  Factory Method for source selection
+parsed_rate.py          →  ParsedRate value object (webhook validation)
+parser.py               →  parse_scrape_payload() maps HTTP body → record (Adapter)
+RateRepository          →  reads analytics.mart_* (dbt-built)
 ```
 
 ### Frontend
@@ -220,7 +223,7 @@ Copy `.env.example` to `.env`. All required variables are documented there. The 
 ├── data/              # rates_seed.parquet
 ├── docs/              # SCHEMA.md, DECISIONS.md, AWS_DEPLOYMENT.md, INGEST_WEBHOOK.md
 ├── infra/terraform/   # AWS infrastructure
-├── scripts/           # logs.sh, aws/*.sh
+├── scripts/           # aws/*.sh
 ├── docker-compose.yml
 └── Makefile
 ```
@@ -269,12 +272,16 @@ See [docs/DECISIONS.md](./docs/DECISIONS.md#caching-strategy) for flow examples 
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
-- **Backend:** Postgres + Redis services, migrations, full pytest suite
+- **Backend:** Postgres + Redis services, migrations, full pytest suite (36 tests)
 - **Frontend:** ESLint, Vitest, production `next build`
+
+CI sets `DBT_RUN_AFTER_INGEST=false`; API tests seed mart tables via test helpers instead of running dbt.
 
 ## AWS deployment (CI/CD)
 
 Production deployment to **ECS Fargate + RDS + ElastiCache + ALB** in **`ap-south-1` (Mumbai)** with automated deploy on merge to `main`.
+
+The backend image is built from the **repo root** (`docker build -f backend/Dockerfile .`) so the dbt project is baked in at `/dbt`. ECS tasks receive `DBT_PROJECT_DIR`, `DBT_PROFILES_DIR`, and `DBT_RUN_AFTER_INGEST=true`.
 
 See **[docs/AWS_DEPLOYMENT.md](./docs/AWS_DEPLOYMENT.md)** for the full guide. Summary:
 

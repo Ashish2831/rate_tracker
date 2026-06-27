@@ -1,22 +1,8 @@
-"""Django ORM models for providers, raw scrape payloads, and rate snapshots."""
+"""Django ORM models — raw ingest (bronze) and dbt mart mirrors (read-only)."""
 
 import uuid
 
 from django.db import models
-
-
-class Provider(models.Model):
-    """Financial institution; normalized_name is the canonical lookup key (e.g. 'hsbc')."""
-
-    name = models.CharField(max_length=128, unique=True)
-    normalized_name = models.CharField(max_length=128, unique=True, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["normalized_name"]
-
-    def __str__(self) -> str:
-        return self.name
 
 
 class RawResponse(models.Model):
@@ -41,41 +27,52 @@ class RawResponse(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["fetched_at"]),
+            models.Index(fields=["created_at"]),
         ]
 
     def __str__(self) -> str:
         return f"{self.external_id} ({self.parse_status})"
 
 
-class Rate(models.Model):
-    """Point-in-time rate observation; null rate_value = partial record excluded from read APIs."""
+class MartRate(models.Model):
+    """dbt analytics.mart_rates — cleaned, deduplicated rate facts (Option B read path)."""
 
-    provider = models.ForeignKey(Provider, on_delete=models.PROTECT, related_name="rates")
+    id = models.BigIntegerField(primary_key=True)
+    provider_name = models.CharField(max_length=128)
+    normalized_name = models.CharField(max_length=128, db_index=True)
     rate_type = models.CharField(max_length=64, db_index=True)
-    rate_value = models.DecimalField(max_digits=8, decimal_places=4, null=True, blank=True)
+    rate_value = models.DecimalField(max_digits=8, decimal_places=4)
     effective_date = models.DateField(db_index=True)
     ingestion_ts = models.DateTimeField(db_index=True)
     currency = models.CharField(max_length=3, default="USD")
-    raw_response = models.ForeignKey(
-        RawResponse, on_delete=models.PROTECT, related_name="rates", null=True, blank=True
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
+    external_id = models.CharField(max_length=64, unique=True)
 
     class Meta:
-        indexes = [
-            models.Index(fields=["provider", "rate_type", "-effective_date"]),
-            models.Index(fields=["provider", "rate_type", "effective_date"]),
-            models.Index(fields=["-ingestion_ts"]),
-            models.Index(fields=["ingestion_ts"]),
-        ]
-        constraints = [
-            # Allows multiple observations per business key when ingestion_ts differs.
-            models.UniqueConstraint(
-                fields=["provider", "rate_type", "effective_date", "ingestion_ts"],
-                name="unique_rate_snapshot",
-            ),
-        ]
+        managed = False
+        db_table = '"analytics"."mart_rates"'
         ordering = ["-effective_date", "-ingestion_ts"]
 
     def __str__(self) -> str:
-        return f"{self.provider.name} {self.rate_type} @ {self.effective_date}"
+        return f"{self.provider_name} {self.rate_type} @ {self.effective_date}"
+
+
+class MartLatestRate(models.Model):
+    """dbt analytics.mart_latest_rates — one row per (provider, rate_type) for GET /latest."""
+
+    id = models.BigIntegerField(primary_key=True)
+    provider_name = models.CharField(max_length=128)
+    normalized_name = models.CharField(max_length=128, db_index=True)
+    rate_type = models.CharField(max_length=64, db_index=True)
+    rate_value = models.DecimalField(max_digits=8, decimal_places=4)
+    effective_date = models.DateField()
+    ingestion_ts = models.DateTimeField()
+    currency = models.CharField(max_length=3, default="USD")
+    external_id = models.CharField(max_length=64, unique=True)
+
+    class Meta:
+        managed = False
+        db_table = '"analytics"."mart_latest_rates"'
+        ordering = ["provider_name", "rate_type"]
+
+    def __str__(self) -> str:
+        return f"{self.provider_name} {self.rate_type} = {self.rate_value}"

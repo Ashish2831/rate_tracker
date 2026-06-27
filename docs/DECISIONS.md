@@ -24,31 +24,34 @@ The parquet file includes `source_url` and `raw_response_id` fields as if data w
 
 | Path | What it does |
 |------|--------------|
-| `python manage.py seed_data` | Reads parquet in bulk (assessment requirement) |
+| `python manage.py seed_data` | Reads parquet into `rates_rawresponse`, then runs dbt |
+| `python manage.py run_dbt` | Refreshes staging → marts (incremental or `--full-refresh`) |
 | `rates/services/scraper.py` | HTTP transport (timeouts, 503 errors) |
-| `rates/services/parser.py` | `parse_scrape_payload()` — normalizes HTTP body to parsed record |
+| `rates/services/parser.py` | Webhook validation + `parse_scrape_payload()` for HTTP adapter |
+| `dbt/models/` | SQL transforms: parse, dedupe, marts |
 | pytest (`test_scraper.py`) | Mocks HTTP and verifies parsed output matches a known fixture |
 
 In production, live URLs would be scraped on a schedule. For the assessment, parquet is the stand-in dataset with the same shape.
 
 ---
 
-### 2. Provider names should be canonicalized at ingestion
+### 2. Provider names are canonicalized in dbt
 
-The seed contains casing variants (`hsbc`, `Hsbc`, `HSBC`). I normalize to a canonical display name at ingestion time rather than at query time, so API responses are consistent.
+The seed contains casing variants (`hsbc`, `Hsbc`, `HSBC`). The dbt `normalize_provider()` macro maps them to a canonical display name at transform time, so API responses are consistent.
 
 **Example — seed input:**
 
 ```
-Row 1:  provider = "hsbc"
-Row 2:  provider = "Hsbc"
-Row 3:  provider = "HSBC"
+Row 1:  raw_body.provider = "hsbc"
+Row 2:  raw_body.provider = "Hsbc"
+Row 3:  raw_body.provider = "HSBC"
 ```
 
-**After `normalize_provider_name()`:**
+**After `int_rates_parsed` (dbt):**
 
 ```
-All three → name: "HSBC", normalized_name: "hsbc"  (single Provider row)
+All three → provider_name: "HSBC", normalized_name: "hsbc"
+Dedupe keeps latest observation per (normalized_name, rate_type, effective_date)
 ```
 
 **API response always shows:**
@@ -57,13 +60,13 @@ All three → name: "HSBC", normalized_name: "hsbc"  (single Provider row)
 { "provider": "HSBC", "rate_type": "savings_1yr_fixed", "rate_value": "4.7647" }
 ```
 
-**Alternative rejected:** normalize in every SQL query (`LOWER(provider)`). That is slower, error-prone, and inconsistent across endpoints.
+**Alternative rejected:** normalize in every API query (`LOWER(provider)`). Canonicalization belongs in the transform layer once, not at read time.
 
 ---
 
-### 3. Duplicate business keys keep the latest observation
+### 3. Duplicate business keys are deduplicated in dbt
 
-~97% of rows share `(provider, rate_type, effective_date)`. I deduplicate during parquet batch loading (keep latest `ingestion_ts`) and use `external_id` uniqueness for idempotent re-runs.
+~97% of rows share `(provider, rate_type, effective_date)`. Django stores **all** distinct raw payloads; dbt `int_rates_deduped` keeps the latest `ingestion_ts` per business key.
 
 **Example — three parquet rows with the same business key:**
 
@@ -73,30 +76,27 @@ All three → name: "HSBC", normalized_name: "hsbc"  (single Provider row)
 | Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-15 14:30 | 6.55 |
 | Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48 |
 
-**During batch load:**
+**In dbt (`int_rates_deduped`):**
 
-```python
-df.sort_values("ingestion_ts").drop_duplicates(
-    subset=["provider", "rate_type", "effective_date"],
-    keep="last",
-)
+```sql
+select distinct on (normalized_name, rate_type, effective_date)
+    ...
+order by normalized_name, rate_type, effective_date, ingestion_ts desc
 ```
 
-**Only this row is inserted:**
+**Only this row appears in marts:**
 
 ```
 Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48
 ```
 
-~972K of ~1M seed rows are duplicates on this business key. Loading all would bloat the DB without adding information. `external_id` uniqueness separately prevents re-inserting the same raw payload on re-run.
+~852K parsed rows → ~27K mart rows. `external_id` uniqueness on raw separately prevents re-inserting the same payload on re-run.
 
 ---
 
-### 4. Invalid rates are stored as partial records
+### 4. Invalid rates are excluded from marts but preserved in bronze
 
-Rows with null or non-positive `rate_value` are persisted with `parse_status=partial` and `rate_value=NULL`, excluded from API read endpoints. This supports replay without data loss.
-
-Rows missing required fields (`rate_type`, `effective_date`, `ingestion_ts`) but with a provider are stored with `parse_status=failed` during bulk/parquet ingest. Webhook ingest rejects them with `400` before persistence.
+Rows with null or non-positive `rate_value` remain in `rates_rawresponse.raw_body`. dbt excludes them from `analytics.mart_rates` (`WHERE rate_value IS NOT NULL`). Webhook ingest still validates before writing raw and rejects bad payloads with `400`.
 
 **Example — seed row with null rate:**
 
@@ -113,23 +113,23 @@ Rows missing required fields (`rate_type`, `effective_date`, `ingestion_ts`) but
 **What gets stored:**
 
 ```
-rates_rawresponse:  parse_status = "partial", error_message = "Invalid or missing rate_value"
-rates_rate:         rate_value = NULL  (linked to raw response)
+rates_rawresponse:  raw_body preserved, parse_status = "success" (bulk path)
+dbt mart_rates:     row excluded (rate_value is null after JSON extract)
 ```
 
 **What the API returns:**
 
 ```
-GET /api/rates/latest  → this row is EXCLUDED (WHERE rate_value IS NOT NULL)
+GET /api/rates/latest  → this row is EXCLUDED (not in mart_latest_rates)
 ```
 
-The raw payload is preserved so an engineer can inspect `raw_body`, fix the parser, and replay `bad-001` without re-scraping. There are ~215 such rows in the seed (200 null + 15 non-positive).
+The raw payload is preserved so an engineer can inspect `raw_body`, fix the dbt model or parser, and replay without re-scraping. There are ~215 such rows in the seed (200 null + 15 non-positive).
 
 ---
 
 ### 5. Celery Beat re-processes the seed file on schedule
 
-In production this would call live provider URLs; for the assessment, scheduled ingestion re-runs parquet loading idempotently to demonstrate the scheduler wiring.
+In production this would call live provider URLs; for the assessment, scheduled ingestion re-runs parquet loading idempotently, then incremental dbt refresh.
 
 **Example — every 15 minutes:**
 
@@ -137,6 +137,7 @@ In production this would call live provider URLs; for the assessment, scheduled 
 Celery Beat triggers → run_scheduled_ingestion task
                      → reads /data/rates_seed.parquet
                      → skips existing external_id values (idempotent)
+                     → dbt run (incremental, ~0.6s when no new rows)
 ```
 
 **Example log output on second run:**
@@ -161,10 +162,10 @@ The seed file has four categories of duplication/quality issues:
 
 | Issue | Count (approx.) | Handling |
 |-------|-----------------|----------|
-| Duplicate `(provider, rate_type, effective_date)` | ~972K | Pre-dedupe per batch: sort by `ingestion_ts`, keep last |
-| Duplicate `raw_response_id` | 0 | `external_id` UNIQUE + `get_or_create` / `ignore_conflicts` on bulk insert |
-| Invalid `rate_value` (null or ≤0) | 215 | Store as `partial` raw response; skip from read APIs |
-| Provider casing variants | 3 variants of HSBC | `normalized_name` lookup table at ingestion |
+| Duplicate `(provider, rate_type, effective_date)` | ~972K | dbt `int_rates_deduped`: keep latest `ingestion_ts` |
+| Duplicate `raw_response_id` | 0 | `external_id` UNIQUE + pre-filter / `ignore_conflicts` on bulk insert |
+| Invalid `rate_value` (null or ≤0) | 215 | Stored in raw; excluded from dbt marts |
+| Provider casing variants | 3 variants of HSBC | dbt `normalize_provider()` macro |
 
 ### Example — re-run safety for `seed_data`
 
@@ -201,17 +202,19 @@ curl -X POST http://localhost:8000/api/rates/ingest \
 
 ```
 Parquet row: { provider: "hsbc", rate_value: null, raw_response_id: "x1" }
-  ├─ Assumption 2: canonicalize → Provider(name="HSBC")
-  ├─ Assumption 4: partial record → RawResponse(parse_status="partial")
-  ├─ Schema: rates_rate.rate_value = NULL
-  └─ API: excluded from /latest, but preserved for replay
+  ├─ Django: rates_rawresponse (raw_body preserved)
+  ├─ dbt: int_rates_parsed → rate_value null
+  ├─ dbt: mart_rates → excluded (WHERE rate_value IS NOT NULL)
+  └─ API: excluded from /latest, but raw preserved for replay
 
 Parquet row: { provider: "Chase", same business key, older ingestion_ts }
-  ├─ Assumption 3: dedupe batch → dropped (newer row kept)
-  └─ Schema: composite unique allows different ingestion_ts if both were kept
+  ├─ Django: both raw payloads stored (distinct external_id)
+  ├─ dbt: int_rates_deduped → older row dropped, latest kept
+  └─ mart_rates: one row per business key
 
 Re-run seed_data
-  ├─ Idempotency: external_id UNIQUE → 0 new rows
+  ├─ Idempotency: external_id UNIQUE → 0 new raw rows
+  ├─ dbt incremental → MERGE 0 rows
   └─ Stats: skipped_duplicates = total existing count
 ```
 
@@ -259,7 +262,7 @@ docker-compose.yml:
 
 ## Conscious Tradeoff: PyArrow batch streaming over full pandas read or COPY
 
-**Chose PyArrow `iter_batches()`** with per-batch pandas dedupe and Django `bulk_create`, over loading the entire parquet file at once or using Postgres `COPY`.
+**Chose PyArrow `iter_batches()`** with Django raw-only `bulk_create`, then dbt transforms, over loading the entire parquet file at once or using Postgres `COPY`.
 
 ### What we chose
 
@@ -273,23 +276,26 @@ rates_seed.parquet (Snappy-compressed, ~1M rows)
   iter_batches(batch_size=10_000)     ← memory-bounded read
         │
         ▼
-  batch.to_pandas() → dedupe → parse → bulk_create
+  bulk_create rates_rawresponse       ← full row in raw_body
         │
-        ├── rates_rawresponse   (lineage + external_id idempotency)
-        └── rates_rate            (cleaned facts, FK to provider + raw)
+        ▼
+  dbt run (incremental)               ← parse, dedupe, marts in SQL
+        │
+        ├── staging.stg_raw_responses
+        ├── intermediate.int_rates_*
+        └── analytics.mart_rates / mart_latest_rates
 ```
 
 **Example — one batch through the pipeline:**
 
 ```
 Batch 10_000 rows in
-  → sort by ingestion_ts, drop_duplicates on (provider, rate_type, effective_date) → ~300 rows out
-  → parse_rate_record() → skip invalid / flag partial
   → filter existing external_id values
-  → bulk_create RawResponse + Rate (ignore_conflicts on re-run)
+  → bulk_create RawResponse (full parquet row in raw_body)
+  → dbt incremental: parse → dedupe → merge into marts
 ```
 
-Implementation: `rates/services/sources.py` (`ParquetRateSource`), `rates/services/rate_writer.py` (`bulk_persist`).
+Implementation: `rates/services/sources.py` (`ParquetRateSource`), `rates/services/rate_writer.py` (`bulk_persist`), `dbt/models/`.
 
 ### Alternative A: `pandas.read_parquet()` on the whole file
 
@@ -304,73 +310,51 @@ for chunk in np.array_split(df, 100):
 |---|-------------------|------------------|
 | Peak memory | ~one batch (~10K rows) | ~entire file (~1M rows) |
 | Fits 48h scope | ✅ simple, predictable | ⚠️ risk of OOM in Docker |
-| Dedupe timing | Per batch before insert | Can dedupe globally first (slightly cleaner) |
+| Dedupe timing | In dbt (global, correct) | Can dedupe globally first (slightly cleaner) |
 | Library | PyArrow native + small pandas per batch | pandas only |
+| Transforms | dbt SQL after load | All in Python |
 
 - **Why batches:** The assessment calls out *loading strategy* for a large Snappy parquet file; streaming keeps the backend container stable during `seed_data`.
-- **Why not whole-file pandas:** Faster to write for a one-off script, but loads ~1M rows into process memory before any DB work. Global dedupe is nicer theoretically, but batch dedupe is sufficient because duplicate business keys share the same `(provider, rate_type, effective_date)` and we keep the row with the latest `ingestion_ts`.
+- **Why not whole-file pandas:** Faster to write for a one-off script, but loads ~1M rows into process memory before any DB work. Dedupe and normalization now live in dbt where they can run incrementally.
 
 ### Alternative B: Postgres `COPY FROM`
 
 ```sql
 COPY rates_staging FROM '/tmp/rates.csv' WITH (FORMAT csv);
--- then INSERT INTO rates_rate SELECT ... JOIN rates_provider ...
+-- then dbt models populate analytics.mart_rates
 ```
 
-| | Django bulk_create | Postgres COPY |
+| | Django raw + dbt | Postgres COPY |
 |---|-------------------|---------------|
 | Raw insert speed | Good (batched INSERTs) | Fastest (binary stream into table) |
-| Multi-table + FK wiring | ✅ RawResponse → Provider → Rate in one Python path | ❌ needs staging tables + SQL transforms |
-| Parse validation / parse_status | ✅ in `parser.py` per row | ❌ must reimplement in SQL or pre-process |
-| Idempotent re-run | ✅ `external_id` pre-filter + `ignore_conflicts` | ⚠️ extra dedupe SQL or truncate-and-reload |
-| ORM / transactions | ✅ `transaction.atomic()` per batch | ⚠️ separate tooling (psql, `\copy`, Celery task) |
+| Transform layer | ✅ dbt SQL models | ✅ dbt or SQL after COPY |
+| Parse validation | ✅ in dbt `int_rates_parsed` | ❌ must reimplement in SQL |
+| Idempotent re-run | ✅ `external_id` pre-filter + dbt incremental | ⚠️ extra dedupe SQL or truncate-and-reload |
+| ORM / transactions | ✅ `transaction.atomic()` per batch | ⚠️ separate tooling |
 
-- **Why bulk_create:** Ingestion writes **two** tables with business logic (provider canonicalization, partial/failed raw rows, skip null rates from read APIs). COPY excels at flat loads into a single staging table; this pipeline is closer to an application ETL job.
-- **Why not COPY (for now):** Would be the right next step for a dedicated analytics bulk-load path (staging CSV → SQL transform → mart), but adds staging schema and SQL without improving the assessment’s API + dashboard deliverables.
-- **Hybrid with more time:** COPY into a `rates_staging` table, then a SQL or dbt model to populate `rates_rate` — fastest load, logic stays in the warehouse layer.
+- **Why raw + dbt:** Django handles online ingest (webhook idempotency, validation); dbt owns transforms with incremental models and schema tests.
+- **Why not COPY (for now):** Would speed raw load further, but adds staging-table tooling without changing the assessment deliverables. Natural next step: `COPY → rates_rawresponse` or a staging table, then existing dbt models.
+- **Implemented:** dbt mart layer with incremental refresh (~0.6s on Celery re-run). See [SCHEMA.md](SCHEMA.md).
 
 ---
 
 ## One Thing I'd Change With More Time
 
-### Primary: materialized view or denormalized `latest_rates` table
+### Implemented: dbt mart layer + `mart_latest_rates`
 
-**Current approach:**
+**Current approach (shipped):**
 
-`GET /api/rates/latest` on cache miss runs:
+Django writes raw-only; dbt builds incremental models and a pre-computed latest table:
 
 ```sql
-DISTINCT ON (provider_id, rate_type) ...
-ORDER BY effective_date DESC, ingestion_ts DESC
+SELECT * FROM analytics.mart_latest_rates;  -- ~50 rows, powers GET /latest
 ```
 
-Across ~30K deduplicated rows, with Redis cache (60s TTL).
+`mart_latest_rates` is rebuilt on every dbt run (~0.06s). Redis cache-aside (60s TTL) wraps the read path.
 
-**Example under load:**
+**Remaining gap:** On cache miss, history/ingested still scan `mart_rates` (~27K rows). Further optimization would add date-partitioned marts or BRIN indexes on `ingestion_ts`.
 
-```
-1000 requests/min, cache expires every 60s
-→ ~17 expensive DB queries/sec on cache miss path
-```
-
-**Proposed improvement:**
-
-```
-latest_rates table (denormalized, refreshed on every ingest):
-
-┌──────────┬─────────────────────┬────────────┬──────────────┐
-│ provider │ rate_type           │ rate_value │ updated_at   │
-├──────────┼─────────────────────┼────────────┼──────────────┤
-│ Chase    │ 30yr_fixed_mortgage │ 6.75       │ 2025-06-01   │
-│ HSBC     │ savings_1yr_fixed   │ 4.76       │ 2025-01-12   │
-└──────────┴─────────────────────┴────────────┴──────────────┘
-
-Refreshed via Celery signal after each ingest
-→ GET /latest becomes SELECT * FROM latest_rates  (O(1) per row)
-→ cache invalidation simplifies to a single table refresh
-```
-
-### Secondary: WebSocket push instead of 60-second polling
+### Primary: WebSocket push instead of 60-second polling
 
 **Current frontend behavior:**
 
@@ -397,7 +381,7 @@ POST /api/rates/ingest succeeds
 
 This would reduce API load and give true real-time updates when ingest webhooks fire.
 
-### Tertiary: JWT for ingest authentication (replacing static bearer secret)
+### Secondary: JWT for ingest authentication (replacing static bearer secret)
 
 **Current approach (assessment requirement 2B):**
 

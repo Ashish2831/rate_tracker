@@ -1,10 +1,9 @@
-"""DRF serializers — shared field lists for latest and history responses."""
+"""DRF serializers — API shapes backed by dbt mart models."""
 
 from rest_framework import serializers
 
-from rates.models import Rate
+from rates.models import MartLatestRate, MartRate, RawResponse
 
-# Single source of truth for latest-rate JSON shape across serializers.
 LATEST_RATE_FIELDS = [
     "provider",
     "rate_type",
@@ -18,21 +17,29 @@ LATEST_RATE_FIELDS = [
 class RateSerializer(serializers.ModelSerializer):
     """Full rate row — includes database id (history + ingested paginated responses)."""
 
-    provider = serializers.CharField(source="provider.name", read_only=True)
+    provider = serializers.CharField(source="provider_name", read_only=True)
 
     class Meta:
-        model = Rate
+        model = MartRate
         fields = ["id", *LATEST_RATE_FIELDS]
 
 
 class LatestRateSerializer(serializers.ModelSerializer):
-    """Latest-rate shape — omits id because DISTINCT ON returns one row per provider/type."""
+    """Latest-rate shape — one row per provider/type from mart_latest_rates."""
 
-    provider = serializers.CharField(source="provider.name", read_only=True)
+    provider = serializers.CharField(source="provider_name", read_only=True)
 
     class Meta:
-        model = Rate
+        model = MartLatestRate
         fields = LATEST_RATE_FIELDS
+
+
+class RawResponseSerializer(serializers.ModelSerializer):
+    """Webhook ingest ack — raw payload stored; marts refresh via dbt."""
+
+    class Meta:
+        model = RawResponse
+        fields = ["external_id", "parse_status", "fetched_at", "source_url"]
 
 
 class IngestRateSerializer(serializers.Serializer):
