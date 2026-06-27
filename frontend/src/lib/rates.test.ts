@@ -1,7 +1,9 @@
+/** Unit tests for rate aggregation and grouping helpers. */
+
 import { describe, expect, it } from "vitest";
 
 import { LatestRate } from "@/interfaces/rates";
-import { groupRatesByProvider } from "@/lib/rates";
+import { bestRateFromRates, groupRatesByProvider } from "@/lib/rates";
 
 const sample: LatestRate[] = [
   {
@@ -35,5 +37,22 @@ describe("groupRatesByProvider", () => {
     const grouped = groupRatesByProvider(sample);
     expect(grouped.get("Chase")).toHaveLength(2);
     expect(grouped.get("HSBC")).toHaveLength(1);
+  });
+});
+
+describe("bestRateFromRates", () => {
+  it("returns the highest numeric rate", () => {
+    expect(bestRateFromRates(sample)).toBe(6.75);
+  });
+
+  it("returns null when no valid rates exist", () => {
+    expect(
+      bestRateFromRates([
+        {
+          ...sample[0],
+          rate_value: null,
+        },
+      ]),
+    ).toBeNull();
   });
 });

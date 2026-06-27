@@ -257,6 +257,80 @@ docker-compose.yml:
 
 ---
 
+## Conscious Tradeoff: PyArrow batch streaming over full pandas read or COPY
+
+**Chose PyArrow `iter_batches()`** with per-batch pandas dedupe and Django `bulk_create`, over loading the entire parquet file at once or using Postgres `COPY`.
+
+### What we chose
+
+```
+rates_seed.parquet (Snappy-compressed, ~1M rows)
+        │
+        ▼
+  pyarrow.parquet.ParquetFile(path)
+        │
+        ▼
+  iter_batches(batch_size=10_000)     ← memory-bounded read
+        │
+        ▼
+  batch.to_pandas() → dedupe → parse → bulk_create
+        │
+        ├── rates_rawresponse   (lineage + external_id idempotency)
+        └── rates_rate            (cleaned facts, FK to provider + raw)
+```
+
+**Example — one batch through the pipeline:**
+
+```
+Batch 10_000 rows in
+  → sort by ingestion_ts, drop_duplicates on (provider, rate_type, effective_date) → ~300 rows out
+  → parse_rate_record() → skip invalid / flag partial
+  → filter existing external_id values
+  → bulk_create RawResponse + Rate (ignore_conflicts on re-run)
+```
+
+Implementation: `rates/services/sources.py` (`ParquetRateSource`), `rates/services/rate_writer.py` (`bulk_persist`).
+
+### Alternative A: `pandas.read_parquet()` on the whole file
+
+```python
+df = pd.read_parquet("/data/rates_seed.parquet")  # all ~1M rows in RAM
+df = df.sort_values("ingestion_ts").drop_duplicates(...)
+for chunk in np.array_split(df, 100):
+    bulk_persist(chunk.to_dict("records"))
+```
+
+| | PyArrow batches | Full pandas read |
+|---|-------------------|------------------|
+| Peak memory | ~one batch (~10K rows) | ~entire file (~1M rows) |
+| Fits 48h scope | ✅ simple, predictable | ⚠️ risk of OOM in Docker |
+| Dedupe timing | Per batch before insert | Can dedupe globally first (slightly cleaner) |
+| Library | PyArrow native + small pandas per batch | pandas only |
+
+- **Why batches:** The assessment calls out *loading strategy* for a large Snappy parquet file; streaming keeps the backend container stable during `seed_data`.
+- **Why not whole-file pandas:** Faster to write for a one-off script, but loads ~1M rows into process memory before any DB work. Global dedupe is nicer theoretically, but batch dedupe is sufficient because duplicate business keys share the same `(provider, rate_type, effective_date)` and we keep the row with the latest `ingestion_ts`.
+
+### Alternative B: Postgres `COPY FROM`
+
+```sql
+COPY rates_staging FROM '/tmp/rates.csv' WITH (FORMAT csv);
+-- then INSERT INTO rates_rate SELECT ... JOIN rates_provider ...
+```
+
+| | Django bulk_create | Postgres COPY |
+|---|-------------------|---------------|
+| Raw insert speed | Good (batched INSERTs) | Fastest (binary stream into table) |
+| Multi-table + FK wiring | ✅ RawResponse → Provider → Rate in one Python path | ❌ needs staging tables + SQL transforms |
+| Parse validation / parse_status | ✅ in `parser.py` per row | ❌ must reimplement in SQL or pre-process |
+| Idempotent re-run | ✅ `external_id` pre-filter + `ignore_conflicts` | ⚠️ extra dedupe SQL or truncate-and-reload |
+| ORM / transactions | ✅ `transaction.atomic()` per batch | ⚠️ separate tooling (psql, `\copy`, Celery task) |
+
+- **Why bulk_create:** Ingestion writes **two** tables with business logic (provider canonicalization, partial/failed raw rows, skip null rates from read APIs). COPY excels at flat loads into a single staging table; this pipeline is closer to an application ETL job.
+- **Why not COPY (for now):** Would be the right next step for a dedicated analytics bulk-load path (staging CSV → SQL transform → mart), but adds staging schema and SQL without improving the assessment’s API + dashboard deliverables.
+- **Hybrid with more time:** COPY into a `rates_staging` table, then a SQL or dbt model to populate `rates_rate` — fastest load, logic stays in the warehouse layer.
+
+---
+
 ## One Thing I'd Change With More Time
 
 ### Primary: materialized view or denormalized `latest_rates` table
@@ -485,10 +559,10 @@ Steady read traffic   → cache refreshed on miss; TTL resets on each set()
 
 | Principle | Location |
 |-----------|----------|
-| **SRP** | Custom hooks (`useRateFilters`, `useLatestRates`, `useRateHistory`, `useIngestedRates`, `useSortableRates`) each own one concern |
+| **SRP** | Custom hooks (`useDashboard`, `useRateFilters`, `useLatestRates`, `useRateHistory`, `useIngestedRates`, `useSortableRates`) each own one concern |
 | **DIP** | `RatesApiClient` in `interfaces/ratesApiClient.ts` — hooks accept injectable client (default in `lib/api.ts`) |
 | **Pure functions** | `lib/sortRates.ts`, `lib/format.ts`, `lib/rates.ts`, `lib/history.ts`, `lib/errors.ts` — testable without React |
-| **Composition** | `DashboardClient.tsx` wires hooks + presentational components; filters default to `""` via `useState` |
+| **Composition** | `DashboardClient.tsx` is a thin shell; tab panels live in `components/dashboard/`; filters default to `""` via `useState` |
 
 ---
 
@@ -499,7 +573,7 @@ Steady read traffic   → cache refreshed on miss; TTL resets on each set()
 | Parser / writer unit tests | `test_parser.py`, `test_services.py` | No |
 | HTTP scrape transport + payload parsing | `test_scraper.py` | No |
 | API integration tests | `test_api.py` | Yes (Postgres + Redis via Compose) |
-| Frontend unit tests | `sortRates.test.ts`, `rates.test.ts`, `history.test.ts` (Vitest) | No |
+| Frontend unit tests | `sortRates.test.ts`, `rates.test.ts`, `history.test.ts`, `format.test.ts`, `apiPagination.test.ts`, `RateTable/utils.test.ts` (Vitest) | No |
 
 `make test` runs the full suite inside Compose. Without Docker, run the unit-test rows above locally; API tests require the database.
 

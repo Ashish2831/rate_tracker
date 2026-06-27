@@ -5,11 +5,11 @@ import logging
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from rates.api.authentication import BearerTokenAuthentication
+from rates.api.pagination import PaginatedRateListMixin
 from rates.api.permissions import HasBearerToken
 from rates.api.serializers import IngestRateSerializer, RateSerializer
 from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
@@ -22,12 +22,6 @@ from rates.services.rate_history_service import RateHistoryService
 logger = logging.getLogger("rates.api")
 
 
-class HistoryPagination(PageNumberPagination):
-    page_size = 50
-    page_size_query_param = "page_size"
-    max_page_size = 200
-
-
 class ServiceAPIView(APIView):
     """Base view — delegates business logic to an injectable service class."""
 
@@ -38,6 +32,8 @@ class ServiceAPIView(APIView):
 
 
 class LatestRatesView(ServiceAPIView):
+    """GET /api/rates/latest — cache-aside latest rate per provider (optional filters)."""
+
     service_class = LatestRatesCacheService
 
     def get(self, request):
@@ -49,14 +45,17 @@ class LatestRatesView(ServiceAPIView):
 
 
 class RateFiltersView(ServiceAPIView):
+    """GET /api/rates/filters — distinct providers and rate types for dashboard dropdowns."""
+
     service_class = RateFiltersService
 
     def get(self, request):
         return Response(self.get_service().get_options())
 
 
-class RateHistoryView(ServiceAPIView):
-    pagination_class = HistoryPagination
+class RateHistoryView(PaginatedRateListMixin, ServiceAPIView):
+    """GET /api/rates/history — paginated 30-day history (requires provider + type)."""
+
     service_class = RateHistoryService
 
     def get(self, request):
@@ -75,14 +74,12 @@ class RateHistoryView(ServiceAPIView):
             date_from=request.query_params.get("from"),
             date_to=request.query_params.get("to"),
         )
-
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(queryset, request)
-        return paginator.get_paginated_response(RateSerializer(page, many=True).data)
+        return self.paginate_rates(request, queryset)
 
 
-class IngestedRatesView(ServiceAPIView):
-    pagination_class = HistoryPagination
+class IngestedRatesView(PaginatedRateListMixin, ServiceAPIView):
+    """GET /api/rates/ingested — paginated rates ingested in a rolling 24-hour window."""
+
     service_class = IngestedRatesService
 
     def get(self, request):
@@ -96,9 +93,7 @@ class IngestedRatesView(ServiceAPIView):
         except ValueError as exc:
             return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(queryset, request)
-        return paginator.get_paginated_response(RateSerializer(page, many=True).data)
+        return self.paginate_rates(request, queryset)
 
 
 class IngestRateView(ServiceAPIView):

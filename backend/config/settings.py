@@ -85,6 +85,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
+    # PostgreSQL — tuned indexes live in rates/migrations for the three query patterns.
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": require_env("POSTGRES_DB"),
@@ -98,6 +99,7 @@ DATABASES = {
 REDIS_URL = require_env("REDIS_URL")
 
 CACHES = {
+    # Redis — latest-rates cache-aside + Celery broker (see cache.py epoch invalidation).
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
         "LOCATION": REDIS_URL,
@@ -133,6 +135,7 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
+    # Public GET endpoints; ingest requires bearer token or staff session (see HasBearerToken).
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
         "rates.api.authentication.BearerTokenAuthentication",

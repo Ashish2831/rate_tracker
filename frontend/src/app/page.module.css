@@ -303,30 +303,6 @@
   white-space: nowrap;
 }
 
-.chartControls {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.75rem;
-  margin-bottom: 1.125rem;
-}
-
-@media (min-width: 480px) {
-  .chartControls {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.chartControls label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-subtle);
-}
-
 /* ── Dashboard provider overview ── */
 .providerGrid {
   display: grid;

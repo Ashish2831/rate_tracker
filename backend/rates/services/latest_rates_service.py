@@ -28,6 +28,7 @@ class LatestRatesCacheService:
         rate_type: str | None = None,
         provider: str | None = None,
     ) -> tuple[list[dict], bool]:
+        """Return (serialized rates, cache_hit). Write path never updates cache — epoch bump on ingest."""
         normalized_provider = normalize_provider_name(provider).lower() if provider else None
         cache_key = latest_cache_key(rate_type, normalized_provider, cache_backend=self.cache)
         cached = self.cache.get(cache_key)

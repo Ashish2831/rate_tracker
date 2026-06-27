@@ -68,6 +68,28 @@ def test_rate_history_service_anchors_to_latest_data(mocker):
     repo.get_history.assert_called_once_with("hsbc", "15yr_fixed_mortgage", date(2024, 8, 26), date(2024, 9, 25))
 
 
+def test_ingested_rates_service_resolve_window_defaults():
+    from datetime import datetime, timedelta
+
+    from django.utils import timezone
+
+    from rates.services.ingested_rates_service import IngestedRatesService
+
+    window_from, window_to = IngestedRatesService.resolve_window(None, None, default_hours=24)
+
+    assert window_to is not None
+    assert window_from is not None
+    assert window_to - window_from == timedelta(hours=24)
+    assert abs((timezone.now() - window_to).total_seconds()) < 5
+
+
+def test_ingested_rates_service_resolve_window_invalid():
+    from rates.services.ingested_rates_service import IngestedRatesService
+
+    with pytest.raises(ValueError, match="Invalid datetime"):
+        IngestedRatesService.resolve_window("not-a-datetime", None)
+
+
 def test_create_rate_source_parquet():
     from rates.services.sources import HttpRateSource, ParquetRateSource, create_rate_source
 

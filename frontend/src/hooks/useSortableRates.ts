@@ -3,14 +3,14 @@
 import { useCallback, useMemo, useState, useTransition } from "react";
 
 import { UseSortableRatesResult } from "@/interfaces/hooks";
-import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
+import { Rate, SortDir, SortKey } from "@/interfaces/rates";
 import { nextSortState, sortRates } from "@/lib/sortRates";
 
-export function useSortableRates(
-  rates: LatestRate[],
+export function useSortableRates<T extends Rate>(
+  rates: T[],
   initialKey: SortKey = "rate_value",
-  initialDir: SortDir = "asc"
-): UseSortableRatesResult {
+  initialDir: SortDir = "asc",
+): UseSortableRatesResult<T> {
   const [sortKey, setSortKey] = useState<SortKey>(initialKey);
   const [sortDir, setSortDir] = useState<SortDir>(initialDir);
   const [isSorting, startTransition] = useTransition();
@@ -25,7 +25,7 @@ export function useSortableRates(
         setSortDir(next.sortDir);
       });
     },
-    [sortDir, sortKey]
+    [sortDir, sortKey],
   );
 
   return { sortedRates, sortKey, sortDir, toggleSort, isSorting };

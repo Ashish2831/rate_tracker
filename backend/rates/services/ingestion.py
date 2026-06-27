@@ -51,6 +51,7 @@ class IngestionService:
         )
 
     def ingest_from_source(self, source: RateRecordSource) -> dict[str, int]:
+        """Iterate source batches inside transactions; invalidate cache once at the end."""
         for batch in source.iter_batches():
             with transaction.atomic():
                 self.writer.bulk_persist(batch, self.stats)
@@ -74,6 +75,7 @@ class IngestionService:
         return self.ingest_from_path(path)
 
     def ingest_from_api_payload(self, payload: dict[str, Any]) -> Rate:
+        """Webhook path — single record, raises DuplicateRateError on idempotent re-post."""
         parsed = parsed_from_ingest(payload)
         rate = self.writer.persist_one(parsed, self.stats)
         if not rate:

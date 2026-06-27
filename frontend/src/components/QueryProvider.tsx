@@ -1,3 +1,7 @@
+/**
+ * TanStack Query provider — one client per session with shared stale/retry defaults.
+ * staleTime matches the dashboard auto-refresh interval (60s).
+ */
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

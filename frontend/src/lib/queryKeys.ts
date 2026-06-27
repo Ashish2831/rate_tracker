@@ -1,4 +1,4 @@
-/** TanStack Query key factory — one place for cache identity. */
+/** TanStack Query key factory — one place for cache identity per filter/query combo. */
 
 export const rateKeys = {
   all: ["rates"] as const,

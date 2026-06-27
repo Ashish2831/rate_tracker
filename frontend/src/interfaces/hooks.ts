@@ -1,8 +1,7 @@
 /** Hook option and result types — keeps components decoupled from hook internals. */
 
-import { HistoryPoint, IngestedRate, LatestRate } from "@/interfaces/rates";
+import { HistoryPoint, IngestedRate, LatestRate, Rate, SortDir, SortKey } from "@/interfaces/rates";
 import { RatesApiClient } from "@/interfaces/ratesApiClient";
-import { SortDir, SortKey } from "@/interfaces/rates";
 
 export interface UseLatestRatesOptions {
   providerFilter?: string;
@@ -47,8 +46,8 @@ export interface UseIngestedRatesResult {
   refresh: () => Promise<void>;
 }
 
-export interface UseSortableRatesResult {
-  sortedRates: LatestRate[];
+export interface UseSortableRatesResult<T extends Rate = LatestRate> {
+  sortedRates: T[];
   sortKey: SortKey;
   sortDir: SortDir;
   toggleSort: (key: SortKey) => void;

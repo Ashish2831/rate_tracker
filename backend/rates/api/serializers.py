@@ -16,6 +16,8 @@ LATEST_RATE_FIELDS = [
 
 
 class RateSerializer(serializers.ModelSerializer):
+    """Full rate row — includes database id (history + ingested paginated responses)."""
+
     provider = serializers.CharField(source="provider.name", read_only=True)
 
     class Meta:
@@ -24,6 +26,8 @@ class RateSerializer(serializers.ModelSerializer):
 
 
 class LatestRateSerializer(serializers.ModelSerializer):
+    """Latest-rate shape — omits id because DISTINCT ON returns one row per provider/type."""
+
     provider = serializers.CharField(source="provider.name", read_only=True)
 
     class Meta:

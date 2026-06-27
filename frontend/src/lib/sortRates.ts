@@ -1,6 +1,6 @@
 /** Pure sort utilities — testable without React (Vitest). */
 
-import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
+import { Rate, SortDir, SortKey } from "@/interfaces/rates";
 
 function compareValues(aVal: string | number, bVal: string | number, sortDir: SortDir): number {
   if (aVal < bVal) return sortDir === "asc" ? -1 : 1;
@@ -8,14 +8,14 @@ function compareValues(aVal: string | number, bVal: string | number, sortDir: So
   return 0;
 }
 
-function resolveSortValue(rate: LatestRate, sortKey: SortKey): string | number {
+function resolveSortValue(rate: Rate, sortKey: SortKey): string | number {
   if (sortKey === "rate_value") {
     return Number(rate.rate_value ?? 0);
   }
   return rate[sortKey] as string | number;
 }
 
-export function sortRates(rates: LatestRate[], sortKey: SortKey, sortDir: SortDir): LatestRate[] {
+export function sortRates<T extends Rate>(rates: T[], sortKey: SortKey, sortDir: SortDir): T[] {
   return [...rates].sort((a, b) =>
     compareValues(resolveSortValue(a, sortKey), resolveSortValue(b, sortKey), sortDir)
   );

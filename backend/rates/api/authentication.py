@@ -4,6 +4,8 @@ from rest_framework import authentication, exceptions
 
 
 class BearerTokenAuthentication(authentication.BaseAuthentication):
+    """Validate Authorization: Bearer <INGEST_BEARER_TOKEN> on webhook ingest."""
+
     keyword = "Bearer"
 
     def authenticate(self, request):

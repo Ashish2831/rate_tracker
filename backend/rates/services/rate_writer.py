@@ -33,12 +33,16 @@ class WriteStats:
 
 
 class ProviderResolver:
-    """In-memory cache + get_or_create for provider rows during bulk loads."""
+    """In-memory cache + get_or_create for provider rows during bulk loads.
+    
+    This class is used to resolve provider names to Provider objects during bulk loads and webhook ingestion.
+    """
 
     def __init__(self):
         self._cache: dict[str, Provider] = {}
 
     def resolve(self, name: str) -> Provider:
+        """Return existing Provider row or create one keyed by normalized_name."""
         normalized = normalize_provider_name(name)
         key = normalized.lower()
         if key in self._cache:
@@ -52,8 +56,12 @@ class ProviderResolver:
 
 
 class RateWriter:
-    """Persists parsed records via single-row (webhook) or bulk (parquet) paths."""
+    """Persists parsed records via single-row (webhook) or bulk (parquet) paths.
+    
+    This class is used to persist parsed records via single-row (webhook) or bulk (parquet) paths.
+    """
 
+    # Default source URL for parquet ingestion, this is a placeholder for the actual source URL
     DEFAULT_SOURCE_URL = "https://seed.local/parquet"
 
     def __init__(
@@ -103,8 +111,12 @@ class RateWriter:
 
     @transaction.atomic
     def persist_one(self, parsed: ParsedRate, stats: WriteStats) -> Rate | None:
-        """Webhook path — get_or_create on external_id for idempotent ingest."""
-        parsed = coerce_parsed_dates(parsed)
+        """Webhook path — get_or_create on external_id for idempotent ingest.
+        
+        This method is used to persist a single parsed record via webhook ingestion.
+        """
+
+        parsed = coerce_parsed_dates(parsed) # Coerce the parsed dates to Django-compatible types
         if not parsed:
             stats.invalid_records += 1
             return None
@@ -177,6 +189,7 @@ class RateWriter:
             stats.processed += 1
 
         if raw_to_create:
+            # RawResponse rows must exist before Rate FK assignment in bulk path.
             RawResponse.objects.bulk_create(raw_to_create, ignore_conflicts=True)
             created_rates = Rate.objects.bulk_create(rates_to_create, ignore_conflicts=True)
             stats.inserted_rates += len(created_rates)

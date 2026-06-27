@@ -1,3 +1,5 @@
+/** Unit tests for daily history aggregation (chart data). */
+
 import { describe, expect, it } from "vitest";
 
 import { HistoryRate } from "@/interfaces/rates";

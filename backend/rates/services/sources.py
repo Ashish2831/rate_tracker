@@ -29,11 +29,12 @@ class ParquetRateSource:
         for batch in parquet_file.iter_batches(batch_size=self.batch_size):
             df = batch.to_pandas()
             # ~97% of seed rows share a business key; keep the latest observation.
+            # Sort the dataframe by ingestion timestamp and drop duplicates based on provider, rate type, and effective date
             df = df.sort_values("ingestion_ts").drop_duplicates(
                 subset=["provider", "rate_type", "effective_date"],
                 keep="last",
             )
-            yield df.to_dict(orient="records")
+            yield df.to_dict(orient="records") # Convert the dataframe to a list of dictionaries
 
 
 class HttpRateSource:

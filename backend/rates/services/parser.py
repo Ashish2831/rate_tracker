@@ -193,6 +193,8 @@ def coerce_parsed_dates(parsed: ParsedRate) -> ParsedRate | None:
     if isinstance(ingestion, str):
         ingestion = parse_datetime(ingestion)
     if ingestion and timezone.is_naive(ingestion):
+        # Parquet/CSV often yields naive datetimes — e.g. datetime(2025, 6, 1, 12, 0, 0)
+        # with tzinfo=None. Django USE_TZ=True requires aware UTC before DB insert.
         ingestion = timezone.make_aware(ingestion, dt_timezone.utc)
     if not effective or not ingestion:
         return None

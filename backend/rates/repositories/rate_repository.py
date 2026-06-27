@@ -52,10 +52,10 @@ class RateRepository:
                 rate_type=rate_type,
                 rate_value__isnull=False,
             )
-            .order_by("-effective_date")
-            .values_list("effective_date", flat=True)
-            .first()
-        )
+            .order_by("-effective_date") # Order by effective_date in descending order
+            .values_list("effective_date", flat=True) # Get the effective_date as a list
+            .first() # Get the first effective_date
+        ) # Return the first effective_date
 
     def get_history(
         self,

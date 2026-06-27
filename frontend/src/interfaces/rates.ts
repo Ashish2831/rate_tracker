@@ -1,5 +1,6 @@
 /** Shared domain types matching backend API JSON shapes. */
 
+/** Core rate fields returned by all list endpoints. */
 export interface Rate {
   provider: string;
   rate_type: string;
@@ -10,6 +11,7 @@ export interface Rate {
 }
 
 export type LatestRate = Rate;
+/** History and ingested rows include a database id for stable React keys. */
 export type HistoryRate = Rate & { id: number };
 
 export interface LatestRatesResponse {

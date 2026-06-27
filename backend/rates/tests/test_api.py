@@ -96,7 +96,21 @@ def test_history_endpoint_paginated(api_client, sample_rate):
 
     assert response.status_code == status.HTTP_200_OK
     assert "results" in response.data
+    assert "next" in response.data
+    assert "previous" in response.data
     assert len(response.data["results"]) >= 1
+
+
+@pytest.mark.django_db
+def test_history_endpoint_respects_page_size(api_client, sample_rate):
+    response = api_client.get(
+        "/api/rates/history",
+        {"provider": "Chase", "type": "30yr_fixed_mortgage", "page_size": "1"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.data["results"]) == 1
+    assert response.data["next"] is not None
 
 
 @pytest.mark.django_db

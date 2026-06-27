@@ -8,16 +8,18 @@ from typing import Any
 
 @dataclass
 class ParsedRate:
-    external_id: str
+    """Normalized record flowing from parser → RateWriter (Value Object)."""
+
+    external_id: str  # Maps to RawResponse.external_id for idempotent ingest
     provider_name: str
     rate_type: str
-    rate_value: Decimal | None
+    rate_value: Decimal | None  # None → partial record (excluded from read APIs)
     effective_date: date | str
     ingestion_ts: datetime | str
     currency: str
     source_url: str
     raw_body: dict[str, Any]
-    parse_status: str
+    parse_status: str  # success | partial | failed
     error_message: str
 
     @property

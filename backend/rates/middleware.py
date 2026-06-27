@@ -10,6 +10,8 @@ logger = logging.getLogger("rates.middleware")
 
 
 class SlowQueryLoggingMiddleware:
+    """Emit structured warnings when request duration exceeds SLOW_QUERY_THRESHOLD_MS."""
+
     def __init__(self, get_response):
         self.get_response = get_response
 

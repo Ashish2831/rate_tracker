@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 
 class JsonFormatter(logging.Formatter):
+    """Emit one JSON object per log line for CloudWatch / Docker log aggregation."""
+
     def format(self, record: logging.LogRecord) -> str:
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

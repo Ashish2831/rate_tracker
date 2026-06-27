@@ -78,7 +78,7 @@ make test-backend
 make test-frontend
 ```
 
-Without Docker, unit tests only (21 backend + 7 frontend — API tests need Postgres):
+Without Docker, unit tests only (21 backend + 14 frontend — API tests need Postgres):
 
 ```bash
 cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py rates/tests/test_scraper.py
@@ -170,7 +170,8 @@ API Views (HTTP only)
     ├── RateHistoryService       → RateRepository
     ├── IngestedRatesService     → RateRepository
     ├── RateFiltersService       → RateRepository
-    └── IngestionService         → RateWriter + RateRecordSource (Strategy)
+    ├── IngestionService         → RateWriter + RateRecordSource (Strategy)
+    └── pagination.py            → shared history/ingested pagination (PaginatedRateListMixin)
 
 RateWriter (persist)  →  ProviderResolver + ORM
 ParquetRateSource     →  implements RateRecordSource (Open/Closed)
@@ -184,20 +185,25 @@ parser.py             →  parse_scrape_payload() maps HTTP body → record (Ada
 
 ```
 QueryProvider (TanStack Query)
-DashboardClient.tsx (composition only)
-    ├── useRateFilters       → filter dropdown options (cached 5 min)
-    ├── useLatestRates       → fetch + auto-refresh + loading/error (SRP)
-    ├── useRateHistory       → chart data fetch + day aggregation (SRP)
-    ├── useIngestedRates     → 24h ingested table (SRP)
-    └── useSortableRates     → sort state → sortRates() pure fn (SRP)
+DashboardClient.tsx (thin shell — delegates to useDashboard + tab panels)
+    ├── useDashboard          → filters, tab-scoped queries, coordinated refresh
+    ├── useRateFilters        → filter dropdown options (cached 5 min)
+    ├── useLatestRates        → fetch + auto-refresh + loading/error (SRP)
+    ├── useRateHistory        → chart data fetch + day aggregation (SRP)
+    ├── useIngestedRates      → 24h ingested table (SRP)
+    └── useSortableRates      → sort state → sortRates() pure fn (SRP)
 
+components/dashboard/     → header, stats, filters, tab bar, SortableRatesTab, per-tab panels
+components/RateTable/     → sortable table + column header subcomponents
 lib/api.ts                → ratesApiClient (DIP)
+lib/apiPagination.ts      → multi-page fetch + next-link normalization
 lib/queryKeys.ts          → TanStack Query cache keys
 lib/history.ts            → aggregateHistoryByDay (chart)
-lib/rates.ts              → groupRatesByProvider (dashboard overview cards)
+lib/rates.ts              → groupRatesByProvider, bestRateFromRates
 lib/sortRates.ts          → pure sort utilities
 lib/format.ts             → formatRateType(), formatRateValue()
 lib/errors.ts             → getErrorMessage() shared by hooks
+constants/dashboardTabs.ts → tab metadata (labels, titles, descriptions)
 interfaces/               → shared types (rates, hooks, RatesApiClient)
 hooks/                    → data-fetching and sort-state hooks
 ```
@@ -251,7 +257,9 @@ See [docs/DECISIONS.md](./docs/DECISIONS.md#caching-strategy) for flow examples 
 
 ## Frontend Features
 
-- Sortable rate comparison table (by rate, provider, last updated)
+- Four tabbed views: dashboard overview, latest rates table, 30-day history chart, ingested (24h) table
+- Server-side provider and rate-type filters with TanStack Query caching
+- Sortable rate comparison tables (by rate, provider, last updated)
 - 30-day line chart for selected provider + rate type
 - Auto-refresh every 60 seconds without page reload
 - Visible loading and error states with retry

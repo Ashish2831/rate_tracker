@@ -1,4 +1,4 @@
-/** Injectable API surface for hooks (Dependency Inversion). */
+/** Injectable API surface for hooks (Dependency Inversion — swap in tests). */
 
 import { HistoryRate, LatestRatesResponse, RateFiltersResponse } from "@/interfaces/rates";
 

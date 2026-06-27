@@ -8,12 +8,16 @@ from rates.models import Provider, Rate, RawResponse
 
 @admin.register(Provider)
 class ProviderAdmin(admin.ModelAdmin):
+    """Browse canonical provider names and normalized lookup keys."""
+
     list_display = ("name", "normalized_name", "created_at")
     search_fields = ("name", "normalized_name")
 
 
 @admin.register(RawResponse)
 class RawResponseAdmin(admin.ModelAdmin):
+    """Inspect immutable scrape payloads and parse outcomes."""
+
     list_display = ("external_id", "source_url", "parse_status", "fetched_at")
     list_filter = ("parse_status",)
     search_fields = ("external_id", "source_url")
@@ -38,6 +42,8 @@ class IngestedLast24HoursFilter(admin.SimpleListFilter):
 
 @admin.register(Rate)
 class RateAdmin(admin.ModelAdmin):
+    """Query rate snapshots — supports schema.md pattern #3 (last 24h filter)."""
+
     list_display = ("provider", "rate_type", "rate_value", "effective_date", "ingestion_ts")
     list_filter = ("rate_type", "currency", IngestedLast24HoursFilter, "raw_response__parse_status")
     search_fields = ("provider__name", "rate_type")

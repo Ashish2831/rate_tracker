@@ -1,4 +1,4 @@
-/** Unit tests for pure sort/rates utilities (no React render). */
+/** Unit tests for table sort utilities. */
 
 import { describe, expect, it } from "vitest";
 
