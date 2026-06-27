@@ -4,6 +4,7 @@
 
 import Plot from "react-plotly.js";
 
+import { EmptyState } from "@/components/EmptyState";
 import { HistoryPoint } from "@/interfaces/rates";
 import { formatRateType } from "@/lib/format";
 import styles from "./RateChart.module.css";
@@ -14,12 +15,23 @@ interface Props {
   rateType: string;
 }
 
+const CHART_COLOR = "#0f766e";
+const CHART_FILL = "rgba(15, 118, 110, 0.08)";
+
 export function RateChart({ data, provider, rateType }: Props) {
   if (data.length === 0) {
     return (
-      <p className={styles.empty}>
-        No history data for {provider} — {formatRateType(rateType)}.
-      </p>
+      <EmptyState
+        icon="chart"
+        title="No history available"
+        description={
+          <>
+            No data for <strong>{provider || "this provider"}</strong> —{" "}
+            {formatRateType(rateType || "selected rate type")}. Try another combination or run{" "}
+            <code>make seed</code>.
+          </>
+        }
+      />
     );
   }
 
@@ -35,27 +47,38 @@ export function RateChart({ data, provider, rateType }: Props) {
             type: "scatter",
             mode: "lines+markers",
             name: "Rate",
-            line: { color: "#2563eb", width: 2 },
-            marker: { size: 6, color: "#2563eb" },
-            hovertemplate: "%{y:.2f}%<br>%{x|%b %d, %Y}<extra></extra>",
+            line: { color: CHART_COLOR, width: 2.5, shape: "spline" },
+            marker: { size: 7, color: CHART_COLOR, line: { color: "#fff", width: 1.5 } },
+            fill: "tozeroy",
+            fillcolor: CHART_FILL,
+            hovertemplate: "<b>%{y:.2f}%</b><br>%{x|%b %d, %Y}<extra></extra>",
           },
         ]}
         layout={{
-          title: { text: title, font: { size: 14 } },
-          height: 300,
-          margin: { t: 40, r: 16, b: 40, l: 48 },
+          title: { text: title, font: { size: 13, color: "#64748b", family: "DM Sans, sans-serif" } },
+          height: 320,
+          margin: { t: 44, r: 20, b: 48, l: 52 },
           xaxis: {
             title: "",
             tickformat: "%b %d",
-            gridcolor: "#edf0f4",
+            gridcolor: "#f1f5f9",
+            linecolor: "#e2e8f0",
+            tickfont: { size: 11, color: "#94a3b8" },
           },
           yaxis: {
-            title: "Rate (%)",
+            title: { text: "Rate (%)", font: { size: 11, color: "#94a3b8" } },
             tickformat: ".2f",
-            gridcolor: "#edf0f4",
+            gridcolor: "#f1f5f9",
+            linecolor: "#e2e8f0",
+            tickfont: { size: 11, color: "#94a3b8" },
           },
           paper_bgcolor: "transparent",
           plot_bgcolor: "transparent",
+          hoverlabel: {
+            bgcolor: "#0f172a",
+            bordercolor: "#0f172a",
+            font: { color: "#f8fafc", size: 12 },
+          },
         }}
         config={{ displayModeBar: false, responsive: true }}
         style={{ width: "100%" }}

@@ -1,10 +1,9 @@
 .chart {
   width: 100%;
-  min-height: 280px;
-}
-
-.empty {
-  color: #5a6270;
-  padding: 2rem 0;
-  text-align: center;
+  min-height: 300px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.25rem 0;
+  overflow: hidden;
 }

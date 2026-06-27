@@ -1,19 +1,45 @@
 .wrapper {
   overflow-x: auto;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+}
+
+.table thead {
+  background: var(--color-surface-muted);
 }
 
 .table th,
 .table td {
-  padding: 0.65rem 0.5rem;
+  padding: 0.75rem 1rem;
   text-align: left;
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table th {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
   white-space: nowrap;
+}
+
+.table tbody tr {
+  transition: background 0.12s;
+}
+
+.table tbody tr:hover {
+  background: var(--color-surface-muted);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .table th button {
@@ -25,26 +51,65 @@
   color: inherit;
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.3rem;
+  padding: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+}
+
+.table th button:hover {
+  color: var(--color-primary);
 }
 
 .sort {
-  font-size: 0.75rem;
-  color: #8a93a3;
+  font-size: 0.7rem;
+  color: var(--color-text-subtle);
+}
+
+.sortActive {
+  color: var(--color-primary);
+}
+
+.provider {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.typeBadge {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg-accent);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .rateValue {
-  font-weight: 600;
-  color: #0b6e4f;
+  display: inline-block;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--color-rate);
+  background: var(--color-rate-bg);
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
-.empty {
-  color: #5a6270;
-  padding: 1rem 0;
+.timestamp {
+  color: var(--color-text-muted);
+  font-size: 0.825rem;
+  white-space: nowrap;
 }
 
-@media (max-width: 480px) {
-  .table {
-    font-size: 0.8rem;
+@media (max-width: 640px) {
+  .table th,
+  .table td {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .timestamp {
+    font-size: 0.75rem;
   }
 }

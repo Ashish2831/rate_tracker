@@ -1,7 +1,8 @@
 /** Sortable comparison table for latest rates by provider. */
 
+import { EmptyState } from "@/components/EmptyState";
 import { LatestRate, SortDir, SortKey } from "@/interfaces/rates";
-import { formatRateType } from "@/lib/format";
+import { formatRateType, formatRateValue } from "@/lib/format";
 import styles from "./RateTable.module.css";
 
 interface Props {
@@ -19,12 +20,22 @@ function ariaSortValue(key: SortKey, activeKey: SortKey, dir: SortDir): "ascendi
 
 function SortIndicator({ active, dir }: { active: boolean; dir: SortDir }) {
   if (!active) return <span className={styles.sort} aria-hidden="true">↕</span>;
-  return <span className={styles.sort} aria-hidden="true">{dir === "asc" ? "↑" : "↓"}</span>;
+  return <span className={`${styles.sort} ${styles.sortActive}`} aria-hidden="true">{dir === "asc" ? "↑" : "↓"}</span>;
 }
 
 export function RateTable({ rates, sortKey, sortDir, onSort, isSorting }: Props) {
   if (rates.length === 0) {
-    return <p className={styles.empty}>No rates found. Run `make seed` to load data.</p>;
+    return (
+      <EmptyState
+        icon="table"
+        title="No rates yet"
+        description={
+          <>
+            Load seed data to get started — run <code>make seed</code> in your terminal.
+          </>
+        }
+      />
+    );
   }
 
   return (
@@ -40,7 +51,7 @@ export function RateTable({ rates, sortKey, sortDir, onSort, isSorting }: Props)
             <th>Rate Type</th>
             <th aria-sort={ariaSortValue("rate_value", sortKey, sortDir)}>
               <button type="button" onClick={() => onSort("rate_value")}>
-                Rate (%) <SortIndicator active={sortKey === "rate_value"} dir={sortDir} />
+                Rate <SortIndicator active={sortKey === "rate_value"} dir={sortDir} />
               </button>
             </th>
             <th aria-sort={ariaSortValue("ingestion_ts", sortKey, sortDir)}>
@@ -53,12 +64,16 @@ export function RateTable({ rates, sortKey, sortDir, onSort, isSorting }: Props)
         <tbody>
           {rates.map((rate) => (
             <tr key={`${rate.provider}-${rate.rate_type}`}>
-              <td>{rate.provider}</td>
-              <td>{formatRateType(rate.rate_type)}</td>
-              <td className={styles.rateValue}>
-                {rate.rate_value !== null ? Number(rate.rate_value).toFixed(2) : "—"}
+              <td>
+                <span className={styles.provider}>{rate.provider}</span>
               </td>
-              <td>{new Date(rate.ingestion_ts).toLocaleString()}</td>
+              <td>
+                <span className={styles.typeBadge}>{formatRateType(rate.rate_type)}</span>
+              </td>
+              <td>
+                <span className={styles.rateValue}>{formatRateValue(rate.rate_value !== null ? Number(rate.rate_value) : null)}</span>
+              </td>
+              <td className={styles.timestamp}>{new Date(rate.ingestion_ts).toLocaleString()}</td>
             </tr>
           ))}
         </tbody>

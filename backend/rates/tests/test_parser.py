@@ -15,6 +15,7 @@ def test_validate_rate_value_rejects_invalid():
     assert validate_rate_value(None) is None
     assert validate_rate_value(0) is None
     assert validate_rate_value(-1.5) is None
+    assert validate_rate_value(float("nan")) is None
     assert validate_rate_value(5.25) == Decimal("5.25")
 
 

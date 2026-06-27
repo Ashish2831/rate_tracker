@@ -1,8 +1,9 @@
 """Parse and normalize rate records from parquet rows, webhooks, and HTTP scrape payloads."""
 
+import math
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -33,6 +34,27 @@ def normalize_provider_name(name: str) -> str:
     return PROVIDER_ALIASES.get(key, name.strip().title())
 
 
+CURRENCY_ALIASES = {
+    "usd": "USD",
+    "us dollar": "USD",
+    "us dollars": "USD",
+}
+
+
+def normalize_currency(value: Any) -> str:
+    """Map seed-data variants ('usd', 'US Dollar') to ISO 4217 codes."""
+    if not value:
+        return "USD"
+    raw = str(value).strip()
+    mapped = CURRENCY_ALIASES.get(raw.lower())
+    if mapped:
+        return mapped
+    upper = raw.upper()
+    if len(upper) == 3 and upper.isalpha():
+        return upper
+    return "USD"
+
+
 def validate_rate_value(value: Any) -> Decimal | None:
     """Return Decimal for positive values; None for null, zero, or invalid input."""
     if value is None:
@@ -41,9 +63,18 @@ def validate_rate_value(value: Any) -> Decimal | None:
         decimal_value = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
-    if decimal_value <= 0:
+    if not decimal_value.is_finite() or decimal_value <= 0:
         return None
     return decimal_value
+
+
+def _json_safe(value: Any) -> Any:
+    """Ensure values stored in RawResponse.raw_body are JSON-serializable."""
+    if isinstance(value, Decimal):
+        return str(value) if value.is_finite() else None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value
 
 
 def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
@@ -51,7 +82,7 @@ def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
     return {
         "provider": record.get("provider"),
         "rate_type": record.get("rate_type"),
-        "rate_value": record.get("rate_value"),
+        "rate_value": _json_safe(record.get("rate_value")),
         "effective_date": str(record.get("effective_date")),
         "ingestion_ts": str(record.get("ingestion_ts")),
         "currency": record.get("currency"),
@@ -88,7 +119,7 @@ def parse_rate_record(record: dict[str, Any]) -> ParsedRate | None:
             rate_value=None,
             effective_date=effective_date or now.date(),
             ingestion_ts=ingestion_ts or now,
-            currency=(record.get("currency") or "USD").upper(),
+            currency=normalize_currency(record.get("currency")),
             source_url=record.get("source_url") or "",
             raw_body=build_raw_body(record),
             parse_status="failed",
@@ -104,7 +135,7 @@ def parse_rate_record(record: dict[str, Any]) -> ParsedRate | None:
         rate_value=rate_value,
         effective_date=effective_date,
         ingestion_ts=ingestion_ts,
-        currency=(record.get("currency") or "USD").upper(),
+        currency=normalize_currency(record.get("currency")),
         source_url=record.get("source_url") or "",
         raw_body=build_raw_body(record),
         # Partial records are stored but excluded from read APIs (rate_value IS NOT NULL).
@@ -162,7 +193,7 @@ def coerce_parsed_dates(parsed: ParsedRate) -> ParsedRate | None:
     if isinstance(ingestion, str):
         ingestion = parse_datetime(ingestion)
     if ingestion and timezone.is_naive(ingestion):
-        ingestion = timezone.make_aware(ingestion, timezone.utc)
+        ingestion = timezone.make_aware(ingestion, dt_timezone.utc)
     if not effective or not ingestion:
         return None
     parsed.effective_date = effective
