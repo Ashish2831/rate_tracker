@@ -19,6 +19,7 @@ class WriteStats:
     skipped_duplicates: int = 0
     invalid_records: int = 0
     partial_records: int = 0
+    failed_records: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -27,6 +28,7 @@ class WriteStats:
             "skipped_duplicates": self.skipped_duplicates,
             "invalid_records": self.invalid_records,
             "partial_records": self.partial_records,
+            "failed_records": self.failed_records,
         }
 
 
@@ -93,9 +95,11 @@ class RateWriter:
             raw_response_id=raw.id,
         )
 
-    def _track_partial(self, parsed: ParsedRate, stats: WriteStats) -> None:
+    def _track_parse_status(self, parsed: ParsedRate, stats: WriteStats) -> None:
         if parsed.is_partial:
             stats.partial_records += 1
+        elif parsed.is_failed:
+            stats.failed_records += 1
 
     @transaction.atomic
     def persist_one(self, parsed: ParsedRate, stats: WriteStats) -> Rate | None:
@@ -114,7 +118,7 @@ class RateWriter:
             stats.skipped_duplicates += 1
             return None
 
-        self._track_partial(parsed, stats)
+        self._track_parse_status(parsed, stats)
         rate, rate_created = Rate.objects.get_or_create(
             provider=provider,
             rate_type=parsed.rate_type,
@@ -165,7 +169,7 @@ class RateWriter:
                 continue
             seen_external.add(external_id)
 
-            self._track_partial(parsed, stats)
+            self._track_parse_status(parsed, stats)
             provider = self.provider_resolver.resolve(parsed.provider_name)
             raw = self._build_raw_response(parsed)
             raw_to_create.append(raw)

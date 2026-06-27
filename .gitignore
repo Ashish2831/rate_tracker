@@ -7,4 +7,16 @@ node_modules/
 *.log
 postgres_data/
 
-docs/
+doc/
+
+# Terraform (local provider cache + state — never commit)
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

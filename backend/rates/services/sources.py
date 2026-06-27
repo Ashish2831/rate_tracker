@@ -1,8 +1,11 @@
-"""Strategy pattern — pluggable rate record sources (parquet today; HTTP/CSV later)."""
+"""Strategy pattern — pluggable rate record sources (parquet, HTTP URL, future CSV)."""
 
 from typing import Any, Iterator, Protocol
 
 import pyarrow.parquet as pq
+
+from rates.services.parser import parse_scrape_payload
+from rates.services.scraper import fetch_rate_source
 
 BATCH_SIZE = 10000
 
@@ -33,8 +36,35 @@ class ParquetRateSource:
             yield df.to_dict(orient="records")
 
 
+class HttpRateSource:
+    """Concrete strategy — fetch a single JSON rate payload from a live URL."""
+
+    def __init__(self, url: str):
+        self.url = url
+
+    def iter_batches(self) -> Iterator[list[dict[str, Any]]]:
+        response = fetch_rate_source(self.url)
+        parsed = parse_scrape_payload(response)
+        if not parsed:
+            return
+        yield [
+            {
+                "provider": parsed.provider_name,
+                "rate_type": parsed.rate_type,
+                "rate_value": parsed.rate_value,
+                "effective_date": parsed.effective_date,
+                "ingestion_ts": parsed.ingestion_ts,
+                "currency": parsed.currency,
+                "source_url": parsed.source_url or self.url,
+                "raw_response_id": parsed.external_id,
+            }
+        ]
+
+
 def create_rate_source(path: str) -> RateRecordSource:
-    """Factory Method — select concrete source implementation from path or type."""
+    """Factory Method — select concrete source implementation from path or URL."""
     if path.endswith(".parquet"):
         return ParquetRateSource(path)
+    if path.startswith(("http://", "https://")):
+        return HttpRateSource(path)
     raise ValueError(f"Unsupported rate source: {path}")

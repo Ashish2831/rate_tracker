@@ -96,6 +96,8 @@ Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48
 
 Rows with null or non-positive `rate_value` are persisted with `parse_status=partial` and `rate_value=NULL`, excluded from API read endpoints. This supports replay without data loss.
 
+Rows missing required fields (`rate_type`, `effective_date`, `ingestion_ts`) but with a provider are stored with `parse_status=failed` during bulk/parquet ingest. Webhook ingest rejects them with `400` before persistence.
+
 **Example — seed row with null rate:**
 
 ```json
@@ -321,6 +323,83 @@ This would reduce API load and give true real-time updates when ingest webhooks 
 
 ---
 
+## Caching Strategy
+
+`GET /api/rates/latest` is cached in Redis. History and ingest endpoints are not cached.
+
+### Pattern: Cache-Aside (lazy loading)
+
+| Phase | What happens |
+|-------|--------------|
+| **Read hit** | `LatestRatesCacheService` returns serialized JSON from Redis |
+| **Read miss** | Query Postgres → serialize → `cache.set()` with 60s TTL |
+| **Write (ingest)** | Persist to Postgres only — cache is **not** updated on write |
+
+This is **not** Write-Through (no synchronous cache+DB write), **not** Write-Back (no async DB flush from cache), and **not** pure Write-Around as the overall pattern — reads are explicitly cache-aside. Writes follow **write-around behavior**: ingest skips Redis and invalidates instead.
+
+### Invalidation: epoch bump (O(1))
+
+On every successful ingest (`IngestionService` → `invalidate_rate_caches()`):
+
+```
+INCR rates:latest:epoch
+```
+
+Cache keys include the epoch: `rates:latest:{epoch}:{type|all}`. After ingest, the epoch increments, old keys are orphaned, and the next read repopulates under the new epoch. Stale entries expire via TTL — no `KEYS` scan or `delete_pattern`.
+
+**Example:**
+
+```
+Epoch 0: GET /latest → miss → DB → set rates:latest:0:all
+Epoch 0: GET /latest → hit  (cached: true)
+
+Ingest completes → INCR epoch to 1
+
+Epoch 1: GET /latest → miss → DB → set rates:latest:1:all
+(rates:latest:0:all still in Redis but unreachable — expires in ≤60s)
+```
+
+### Eviction
+
+Eviction is **when stale entries leave Redis**. This app uses two mechanisms — one active (logical), one passive (physical):
+
+| Mechanism | Type | When | What |
+|-----------|------|------|------|
+| **TTL (60s)** | Passive / time-based | Every `cache.set()` on read miss | Redis `EXPIRE` removes the key after 60 seconds with no access |
+| **Epoch bump** | Active / logical | Every ingest | Old keys are **immediately unreachable** (wrong epoch in key); Redis deletes them when their TTL fires |
+| **Epoch key** | Never evicted | `rates:latest:epoch` set with `timeout=None` | Stays in Redis permanently — single integer counter |
+
+We do **not** use application-level **LRU** or **LFU** — the keyspace is tiny (one entry per `?type=` filter × epoch). Redis `maxmemory-policy` is not configured in Docker Compose (demo default: no memory cap); in production you would set `maxmemory` + `allkeys-lru` as a safety net.
+
+**How TTL and epoch work together:**
+
+```
+No ingest for 60s     → TTL expires → key physically removed from Redis
+Ingest before TTL     → epoch bumps → key logically dead, TTL cleans up within ≤60s
+Steady read traffic   → cache refreshed on miss; TTL resets on each set()
+```
+
+**What we deliberately avoid:**
+
+- **`delete_pattern` / `KEYS` scan** — O(n) over keyspace; replaced by epoch + TTL
+- **Manual delete per key** — would require tracking every `?type=` variant
+
+### Why this combination
+
+- **Cache-Aside:** Simple, app-controlled; fits read-heavy `/latest` with infrequent ingest
+- **Epoch invalidation:** Cheap bust across all `?type=` variants without tracking individual keys
+- **Write-around on ingest:** Avoids stale partial cache updates when bulk parquet loads insert thousands of rows
+
+### Code locations
+
+| File | Role |
+|------|------|
+| `rates/services/latest_rates_service.py` | Cache-aside read path |
+| `rates/services/cache.py` | Epoch key, key builder, invalidation |
+| `rates/services/ingestion.py` | Calls invalidation after persist |
+
+---
+
 ## Architecture — SOLID
 
 | Principle | How it is applied |
@@ -338,11 +417,12 @@ This would reduce API load and give true real-time updates when ingest webhooks 
 | Pattern | Location | Purpose |
 |---------|----------|---------|
 | **Repository** | `rates/repositories/rate_repository.py` | Encapsulates ORM queries |
-| **Strategy** | `rates/services/sources.py` | Pluggable record sources (parquet, future HTTP/CSV) |
+| **Strategy** | `rates/services/sources.py` | Pluggable record sources (parquet, HTTP URL) |
 | **Factory Method** | `rates/services/sources.py` (`create_rate_source`) | Selects concrete source from path without changing callers |
 | **Value Object** | `rates/services/parsed_rate.py` (`ParsedRate`) | Typed domain record replacing raw dicts through parser → writer |
 | **Adapter** | `rates/services/parser.py` (`parse_scrape_payload`) | Maps HTTP scrape responses to parsed records |
 | **Facade** | `rates/services/latest_rates_service.py` | Cache-aside + serialization for latest rates |
+| **Epoch invalidation** | `rates/services/cache.py` | O(1) cache bust via INCR on ingest; keys include epoch, stale entries TTL out |
 | **Typed exceptions** | `rates/services/exceptions.py` | Explicit error handling instead of string matching |
 
 ---
@@ -368,3 +448,21 @@ This would reduce API load and give true real-time updates when ingest webhooks 
 | Frontend sort utilities | `sortRates.test.ts` (Vitest) | No |
 
 `make test` runs the full suite inside Compose. Without Docker, run the unit-test rows above locally; API tests require the database.
+
+---
+
+## Production mapping (interview framing)
+
+This take-home runs locally via Docker Compose. In a Forbes Advisor / Marketplace production stack, the same boundaries map as follows:
+
+| Local component | Production analogue |
+|-----------------|---------------------|
+| Structured JSON logs (`rates.ingestion`, slow-request middleware) | **CloudWatch** (or Datadog) log groups + metric filters on `ingestion_end`, `ingestion_error` |
+| `RawResponse` + `parse_status` | **Data lineage** — immutable source payload, replay, and quality flags (`success` / `partial` / `failed`) |
+| Redis cache-aside + epoch invalidation | ElastiCache Redis; same key pattern, TTL, and INCR invalidation |
+| Celery Beat (15 min parquet ingest) | EventBridge / cron → worker task or Step Functions for scheduled pulls |
+| `ingest_url` / webhook POST | API Gateway + Lambda or internal service for partner webhooks |
+| Django admin 24h filter + `date_hierarchy` | Operator/debug UI; production would add read-only analytics or Metabase on Postgres |
+| GitHub Actions CI | Same pipeline extended with deploy stages (ECS/EKS), image scan, and smoke tests |
+
+---

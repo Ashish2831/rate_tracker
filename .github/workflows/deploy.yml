@@ -1,0 +1,92 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'rate-tracker-prod-cluster' }}
+  ECS_NAME_PREFIX: ${{ vars.ECS_NAME_PREFIX || 'rate-tracker-prod' }}
+
+jobs:
+  deploy:
+    name: Deploy to AWS ECS
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image URIs
+        id: images
+        run: |
+          ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          BACKEND="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECS_NAME_PREFIX}-backend"
+          FRONTEND="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECS_NAME_PREFIX}-frontend"
+          echo "backend=${BACKEND}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${FRONTEND}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend
+        env:
+          IMAGE: ${{ steps.images.outputs.backend }}
+        run: |
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./backend
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+
+      - name: Build and push frontend
+        env:
+          IMAGE: ${{ steps.images.outputs.frontend }}
+        run: |
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./frontend
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+
+      - name: Roll ECS services
+        env:
+          ECR_BACKEND_REPO: ${{ steps.images.outputs.backend }}
+          ECR_FRONTEND_REPO: ${{ steps.images.outputs.frontend }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          chmod +x scripts/aws/deploy-ecs.sh
+          ./scripts/aws/deploy-ecs.sh
+
+      - name: Smoke test (health endpoint)
+        run: |
+          ALB_DNS="${{ vars.ALB_DNS_NAME }}"
+          if [ -z "${ALB_DNS}" ]; then
+            echo "Skipping smoke test — set repository variable ALB_DNS_NAME to enable"
+            exit 0
+          fi
+          for i in $(seq 1 20); do
+            if curl -sf "http://${ALB_DNS}/api/health/"; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Waiting for ALB... (${i}/20)"
+            sleep 15
+          done
+          echo "Health check failed"
+          exit 1

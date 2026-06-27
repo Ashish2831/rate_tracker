@@ -57,7 +57,8 @@ class IngestionService:
         self._invalidate_caches()
         return self.stats.as_dict()
 
-    def ingest_from_parquet(self, path: str) -> dict[str, int]:
+    def ingest_from_path(self, path: str) -> dict[str, int]:
+        """Ingest from a parquet path or HTTP(S) URL (factory selects source strategy)."""
         self.log_start(path)
         try:
             source = self._source_factory(path)
@@ -67,6 +68,10 @@ class IngestionService:
         except Exception as exc:
             self.log_error(str(exc))
             raise
+
+    def ingest_from_parquet(self, path: str) -> dict[str, int]:
+        """Backward-compatible alias for ingest_from_path."""
+        return self.ingest_from_path(path)
 
     def ingest_from_api_payload(self, payload: dict[str, Any]) -> Rate:
         parsed = parsed_from_ingest(payload)

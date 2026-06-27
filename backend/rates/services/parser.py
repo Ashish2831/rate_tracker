@@ -62,15 +62,40 @@ def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
 def parse_rate_record(record: dict[str, Any]) -> ParsedRate | None:
     """Core parser — shared by parquet, webhook, and scrape paths."""
     provider = record.get("provider")
+    if not provider:
+        return None
+
     rate_type = record.get("rate_type")
     effective_date = record.get("effective_date")
     ingestion_ts = record.get("ingestion_ts")
+    external_id = record.get("raw_response_id") or str(uuid.uuid4())
 
-    if not provider or not rate_type or not effective_date or not ingestion_ts:
-        return None
+    missing = [
+        name
+        for name, value in (
+            ("rate_type", rate_type),
+            ("effective_date", effective_date),
+            ("ingestion_ts", ingestion_ts),
+        )
+        if not value
+    ]
+    if missing:
+        now = timezone.now()
+        return ParsedRate(
+            external_id=str(external_id),
+            provider_name=normalize_provider_name(str(provider)),
+            rate_type=str(rate_type).strip() if rate_type else "unknown",
+            rate_value=None,
+            effective_date=effective_date or now.date(),
+            ingestion_ts=ingestion_ts or now,
+            currency=(record.get("currency") or "USD").upper(),
+            source_url=record.get("source_url") or "",
+            raw_body=build_raw_body(record),
+            parse_status="failed",
+            error_message=f"Missing required fields: {', '.join(missing)}",
+        )
 
     rate_value = validate_rate_value(record.get("rate_value"))
-    external_id = record.get("raw_response_id") or str(uuid.uuid4())
 
     return ParsedRate(
         external_id=str(external_id),
@@ -104,7 +129,7 @@ def _record_from_ingest(validated: dict[str, Any]) -> dict[str, Any]:
 def parsed_from_ingest(validated: dict[str, Any]) -> ParsedRate:
     """Build parsed record from DRF-validated webhook payload."""
     parsed = parse_rate_record(_record_from_ingest(validated))
-    if not parsed:
+    if not parsed or parsed.is_failed:
         raise InvalidIngestPayloadError("Invalid ingest payload")
     return parsed
 

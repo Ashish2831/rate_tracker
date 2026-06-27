@@ -1,9 +1,10 @@
 /**
  * Fetches latest rates with 60s auto-refresh.
  * Accepts injectable RatesApiClient for testing (DIP).
+ * Shows loading spinner only on initial load / filter change — not on background polls.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { UseLatestRatesOptions, UseLatestRatesResult } from "@/interfaces/hooks";
 import { LatestRate } from "@/interfaces/rates";
@@ -22,14 +23,23 @@ export function useLatestRates({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const hasLoadedRef = useRef(false);
+
+  // Re-show loading when the user changes the type filter.
+  useEffect(() => {
+    hasLoadedRef.current = false;
+  }, [typeFilter]);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
     try {
       const { results } = await client.fetchLatestRates(typeFilter || undefined);
       setRates(results);
       setLastUpdated(new Date());
+      hasLoadedRef.current = true;
     } catch (err) {
       setError(getErrorMessage(err, "Failed to load latest rates."));
     } finally {

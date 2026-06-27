@@ -33,6 +33,13 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+# ALB health checks (awsvpc + IP targets) send Host: <task-private-ip>:8000.
+# Tasks are not public; allow any Host when deployed behind an ALB.
+_on_ecs = bool(os.getenv("ECS_CONTAINER_METADATA_URI") or os.getenv("ECS_CONTAINER_METADATA_URI_V4"))
+_behind_alb = any(".elb." in h for h in ALLOWED_HOSTS)
+if (_on_ecs or _behind_alb) and "*" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("*")
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

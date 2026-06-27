@@ -19,6 +19,7 @@ def test_write_stats_as_dict():
         "skipped_duplicates": 0,
         "invalid_records": 0,
         "partial_records": 0,
+        "failed_records": 0,
     }
 
 
@@ -55,10 +56,41 @@ def test_rate_history_service_default_date_range():
 
 
 def test_create_rate_source_parquet():
-    from rates.services.sources import ParquetRateSource, create_rate_source
+    from rates.services.sources import HttpRateSource, ParquetRateSource, create_rate_source
 
     source = create_rate_source("/data/rates_seed.parquet")
     assert isinstance(source, ParquetRateSource)
+
+
+def test_create_rate_source_http():
+    from rates.services.sources import HttpRateSource, create_rate_source
+
+    source = create_rate_source("https://example.com/rates.json")
+    assert isinstance(source, HttpRateSource)
+    assert source.url == "https://example.com/rates.json"
+
+
+def test_http_rate_source_yields_parsed_record(mocker):
+    from rates.services.sources import HttpRateSource
+
+    mocker.patch(
+        "rates.services.sources.fetch_rate_source",
+        return_value={
+            "source_url": "https://example.com/rates.json",
+            "body": {
+                "provider": "Chase",
+                "rate_type": "30yr_fixed_mortgage",
+                "rate_value": 6.75,
+                "effective_date": "2025-06-01",
+                "ingestion_ts": "2025-06-01T12:00:00Z",
+                "raw_response_id": "http-001",
+            },
+        },
+    )
+    source = HttpRateSource("https://example.com/rates.json")
+    batches = list(source.iter_batches())
+    assert len(batches) == 1
+    assert batches[0][0]["provider"] == "Chase"
 
 
 def test_create_rate_source_unsupported():
@@ -66,3 +98,39 @@ def test_create_rate_source_unsupported():
 
     with pytest.raises(ValueError, match="Unsupported rate source"):
         create_rate_source("/data/rates.csv")
+
+
+def test_latest_cache_key_includes_epoch(mocker):
+    from rates.services import cache as cache_mod
+
+    mocker.patch.object(cache_mod, "get_cache_epoch", return_value=3)
+    assert cache_mod.latest_cache_key("30yr_fixed_mortgage") == "rates:latest:3:30yr_fixed_mortgage"
+    assert cache_mod.latest_cache_key() == "rates:latest:3:all"
+
+
+def test_invalidate_rate_caches_increments_epoch():
+    from rates.services.cache import LATEST_CACHE_EPOCH_KEY, get_cache_epoch, invalidate_rate_caches
+
+    mock_cache = MagicMock()
+    mock_cache.get.return_value = 2
+
+    invalidate_rate_caches(cache_backend=mock_cache)
+    mock_cache.incr.assert_called_once_with(LATEST_CACHE_EPOCH_KEY)
+
+
+def test_invalidate_rate_caches_seeds_epoch_when_missing():
+    from rates.services.cache import LATEST_CACHE_EPOCH_KEY, invalidate_rate_caches
+
+    mock_cache = MagicMock()
+    mock_cache.incr.side_effect = ValueError("Key not found")
+
+    invalidate_rate_caches(cache_backend=mock_cache)
+    mock_cache.set.assert_called_once_with(LATEST_CACHE_EPOCH_KEY, 1, timeout=None)
+
+
+def test_get_cache_epoch_defaults_to_zero():
+    from rates.services.cache import get_cache_epoch
+
+    mock_cache = MagicMock()
+    mock_cache.get.return_value = None
+    assert get_cache_epoch(cache_backend=mock_cache) == 0

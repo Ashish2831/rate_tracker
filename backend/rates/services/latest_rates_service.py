@@ -10,7 +10,7 @@ CACHE_TTL_SECONDS = 60
 
 
 class LatestRatesCacheService:
-    """Facade — cache-aside pattern for latest rates read path."""
+    """Facade — cache-aside with epoch invalidation for latest rates read path."""
 
     def __init__(
         self,
@@ -23,7 +23,7 @@ class LatestRatesCacheService:
         self.ttl = ttl
 
     def get_latest(self, rate_type: str | None = None) -> tuple[list[dict], bool]:
-        cache_key = latest_cache_key(rate_type)
+        cache_key = latest_cache_key(rate_type, cache_backend=self.cache)
         cached = self.cache.get(cache_key)
         if cached is not None:
             return cached, True

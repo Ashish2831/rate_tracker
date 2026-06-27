@@ -38,4 +38,5 @@ export interface UseSortableRatesResult {
   sortKey: SortKey;
   sortDir: SortDir;
   toggleSort: (key: SortKey) => void;
+  isSorting?: boolean;
 }

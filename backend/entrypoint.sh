@@ -6,7 +6,24 @@ until python -c "import psycopg2; psycopg2.connect(dbname='${POSTGRES_DB}', user
   sleep 1
 done
 
-echo "Running migrations..."
-python manage.py migrate --noinput
+if [ -n "${SEED_S3_URI:-}" ] && [ ! -f "${SEED_PARQUET_PATH}" ]; then
+  echo "Downloading seed parquet from ${SEED_S3_URI}..."
+  mkdir -p "$(dirname "${SEED_PARQUET_PATH}")"
+  python - <<'PY'
+import os
+import boto3
+
+uri = os.environ["SEED_S3_URI"]
+path = os.environ["SEED_PARQUET_PATH"]
+bucket, key = uri.replace("s3://", "", 1).split("/", 1)
+boto3.client("s3").download_file(bucket, key, path)
+print(f"Downloaded seed data to {path}")
+PY
+fi
+
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+  echo "Running migrations..."
+  python manage.py migrate --noinput
+fi
 
 exec "$@"

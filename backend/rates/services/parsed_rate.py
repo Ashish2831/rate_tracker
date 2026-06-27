@@ -23,3 +23,7 @@ class ParsedRate:
     @property
     def is_partial(self) -> bool:
         return self.parse_status == "partial"
+
+    @property
+    def is_failed(self) -> bool:
+        return self.parse_status == "failed"

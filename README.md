@@ -59,6 +59,14 @@ make seed
 python manage.py seed_data  # inside backend container
 ```
 
+### Ingest from a live HTTP URL
+
+```bash
+docker compose exec backend python manage.py ingest_url https://example.com/rate.json
+```
+
+Uses `HttpRateSource` (scraper + `parse_scrape_payload` adapter). Useful for one-off live source tests; scheduled ingest still uses parquet via Celery.
+
 ### Run tests
 
 Requires the stack running (`make up`). Runs backend pytest (including API integration tests against Postgres/Redis) and frontend Vitest:
@@ -70,10 +78,10 @@ make test-backend
 make test-frontend
 ```
 
-Without Docker, unit tests only (11 backend + 5 frontend — API tests need Postgres):
+Without Docker, unit tests only (14 backend + 5 frontend — API tests need Postgres):
 
 ```bash
-cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py
+cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py rates/tests/test_scraper.py
 cd frontend && npm test
 ```
 
@@ -102,7 +110,7 @@ make logs
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/api/rates/latest` | None | Latest rate per provider. Optional `?type=` filter. Cached 60s. |
+| GET | `/api/rates/latest` | None | Latest rate per provider. Optional `?type=` filter. Cache-aside (Redis, 60s TTL, epoch invalidation on ingest). |
 | GET | `/api/rates/history` | None | Paginated history. Requires `?provider=` and `?type=`. Optional `?from=` and `?to=`. |
 | POST | `/api/rates/ingest` | Bearer token | Webhook ingest. Set `INGEST_BEARER_TOKEN` in `.env`. |
 
@@ -146,12 +154,13 @@ See [schema.md](./schema.md) for database design and [DECISIONS.md](./DECISIONS.
 
 ```
 API Views (HTTP only)
-    ├── LatestRatesCacheService  → RateRepository + Redis (Facade)
+    ├── LatestRatesCacheService  → RateRepository + Redis (Cache-Aside + epoch invalidation)
     ├── RateHistoryService       → RateRepository
     └── IngestionService         → RateWriter + RateRecordSource (Strategy)
 
 RateWriter (persist)  →  ProviderResolver + ORM
 ParquetRateSource     →  implements RateRecordSource (Open/Closed)
+HttpRateSource        →  live HTTP JSON ingest via scraper + adapter
 create_rate_source()  →  Factory Method for source selection
 parsed_rate.py        →  ParsedRate value object (parser → writer)
 parser.py             →  parse_scrape_payload() maps HTTP body → record (Adapter)
@@ -195,10 +204,24 @@ Copy `.env.example` to `.env`. All required variables are documented there. The 
 
 - **Django + DRF** for typed API with built-in admin and migrations
 - **PostgreSQL** with composite indexes tuned for the three required query patterns
-- **Redis** for API response caching and Celery broker
+- **Redis** for API response caching (cache-aside + epoch invalidation) and Celery broker
 - **Celery Beat** for scheduled ingestion (justified in DECISIONS.md)
 - **Bulk parquet loading** with batch deduplication for ~1M row performance
 - **Structured JSON logging** for ingestion jobs and slow-request warnings (>200ms)
+
+## Caching
+
+Only `GET /api/rates/latest` is cached.
+
+| Aspect | Approach |
+|--------|----------|
+| **Read pattern** | Cache-Aside — check Redis, on miss query Postgres and populate cache |
+| **Write pattern** | Write-around — ingest writes DB only, does not update cache |
+| **Invalidation** | Epoch bump (`INCR rates:latest:epoch`) on every ingest; keys include epoch |
+| **Eviction** | TTL (60s passive) + epoch orphan cleanup; no LRU/LFU (small keyspace) |
+| **TTL** | 60 seconds per cached response |
+
+See [DECISIONS.md](./DECISIONS.md#caching-strategy) for flow examples and tradeoffs.
 
 ## Observability
 
@@ -214,3 +237,37 @@ Copy `.env.example` to `.env`. All required variables are documented there. The 
 - Auto-refresh every 60 seconds without page reload
 - Visible loading and error states with retry
 - Responsive layout (375px+)
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
+
+- **Backend:** Postgres + Redis services, migrations, full pytest suite
+- **Frontend:** ESLint, Vitest, production `next build`
+
+## AWS deployment (CI/CD)
+
+Production deployment to **ECS Fargate + RDS + ElastiCache + ALB** in **`ap-south-1` (Mumbai)** with automated deploy on merge to `main`.
+
+See **[docs/AWS_DEPLOYMENT.md](./docs/AWS_DEPLOYMENT.md)** for the full guide. Summary:
+
+1. `./scripts/aws/bootstrap-state.sh` — create Terraform remote state
+2. `terraform apply` in `infra/terraform/` — provision VPC, RDS, Redis, ECS, ALB, ECR
+3. Upload seed parquet to S3
+4. Set GitHub secret `AWS_ROLE_ARN` (from Terraform output)
+5. Push to `main` → **CI** runs tests → **Deploy** builds images, pushes ECR, rolls ECS
+
+| Workflow | File | Trigger |
+|----------|------|---------|
+| CI | `.github/workflows/ci.yml` | Push/PR to `main` |
+| Deploy | `.github/workflows/deploy.yml` | CI success on `main`, or manual |
+
+## Submission checklist
+
+Before sending to the reviewer:
+
+- [ ] Private GitHub repo shared with assessors
+- [ ] Loom walkthrough (architecture, tradeoffs, demo)
+- [ ] `docker compose up --build` verified end-to-end (seed + dashboard)
+- [ ] `make test` passes with stack running
+- [ ] `.env` uses non-default secrets for any shared environment

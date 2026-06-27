@@ -32,3 +32,18 @@ def test_parse_rate_record_partial_on_null_value():
     parsed = parse_rate_record(record)
     assert parsed is not None
     assert parsed.parse_status == "partial"
+
+
+def test_parse_rate_record_failed_on_missing_required_fields():
+    record = {
+        "provider": "Chase",
+        "rate_type": None,
+        "rate_value": "6.75",
+        "effective_date": "2025-01-01",
+        "ingestion_ts": "2025-01-01T00:00:00",
+        "raw_response_id": "failed-001",
+    }
+    parsed = parse_rate_record(record)
+    assert parsed is not None
+    assert parsed.parse_status == "failed"
+    assert "rate_type" in parsed.error_message
