@@ -16,6 +16,7 @@ jobs:
   deploy:
     name: Deploy to AWS ECS
     runs-on: ubuntu-latest
+    environment: AWS_CI_CD
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
@@ -28,8 +29,8 @@ jobs:
       - name: Verify GitHub secrets
         run: |
           if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
-            echo "::error::Missing GitHub secret AWS_ROLE_ARN."
-            echo "Add it in Settings → Secrets → Actions:"
+            echo "::error::Missing AWS_ROLE_ARN."
+            echo "Add it as a repository secret OR under Environment AWS_CI_CD → Secrets:"
             echo "  terraform output -raw github_actions_role_arn"
             exit 1
           fi

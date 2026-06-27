@@ -130,13 +130,25 @@ This logs in to ECR, builds/pushes both images, and rolls ECS services.
 
 ## Step 5 — Configure GitHub Actions
 
-| Type | Name | Value |
-|------|------|-------|
-| Secret | `AWS_ROLE_ARN` | `terraform output -raw github_actions_role_arn` |
-| Variable | `AWS_REGION` | `ap-south-1` |
-| Variable | `ECS_CLUSTER` | `rate-tracker-prod-cluster` |
-| Variable | `ECS_NAME_PREFIX` | `rate-tracker-prod` |
-| Variable | `ALB_DNS_NAME` | `terraform output -raw alb_dns_name` (optional, for smoke test) |
+Add **`AWS_ROLE_ARN`** in **one** of these places (the Deploy workflow uses the `AWS_CI_CD` environment):
+
+| Where | Path |
+|-------|------|
+| **Environment secret (recommended)** | Settings → Environments → **AWS_CI_CD** → Environment secrets |
+| Repository secret | Settings → Secrets and variables → Actions → Repository secrets |
+
+| Name | Value |
+|------|-------|
+| `AWS_ROLE_ARN` | `terraform output -raw github_actions_role_arn` |
+
+Optional **repository variables** (Settings → Actions → Variables):
+
+| Name | Value |
+|------|-------|
+| `AWS_REGION` | `ap-south-1` |
+| `ECS_CLUSTER` | `rate-tracker-prod-cluster` |
+| `ECS_NAME_PREFIX` | `rate-tracker-prod` |
+| `ALB_DNS_NAME` | `terraform output -raw alb_dns_name` (optional, for smoke test) |
 
 ---
 
