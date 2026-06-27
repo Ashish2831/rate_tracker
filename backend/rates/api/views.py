@@ -1,9 +1,6 @@
 import logging
-from datetime import timedelta
 
-from django.core.cache import cache
 from django.utils import timezone
-from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -11,15 +8,13 @@ from rest_framework.views import APIView
 
 from rates.api.authentication import BearerTokenAuthentication
 from rates.api.permissions import HasBearerToken
-from rates.api.serializers import IngestRateSerializer, LatestRateSerializer, RateSerializer
-from rates.models import Rate
-from rates.services.cache import latest_cache_key
+from rates.api.serializers import IngestRateSerializer, RateSerializer
+from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
 from rates.services.ingestion import IngestionService
-from rates.services.parser import normalize_provider_name
+from rates.services.latest_rates_service import LatestRatesCacheService
+from rates.services.rate_history_service import RateHistoryService
 
 logger = logging.getLogger("rates.api")
-
-CACHE_TTL_SECONDS = 60
 
 
 class HistoryPagination(PageNumberPagination):
@@ -29,45 +24,23 @@ class HistoryPagination(PageNumberPagination):
 
 
 class LatestRatesView(APIView):
+    service_class = LatestRatesCacheService
+
+    def get_service(self) -> LatestRatesCacheService:
+        return self.service_class()
+
     def get(self, request):
         rate_type = request.query_params.get("type")
-        cache_key = latest_cache_key(rate_type)
-
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return Response({"count": len(cached), "results": cached, "cached": True})
-
-        queryset = Rate.objects.select_related("provider").filter(rate_value__isnull=False)
-        if rate_type:
-            queryset = queryset.filter(rate_type=rate_type)
-
-        rates = list(
-            queryset.order_by("provider_id", "rate_type", "-effective_date", "-ingestion_ts").distinct(
-                "provider_id", "rate_type"
-            )
-        )
-
-        data = LatestRateSerializer(
-            [
-                {
-                    "provider": rate.provider.name,
-                    "rate_type": rate.rate_type,
-                    "rate_value": rate.rate_value,
-                    "effective_date": rate.effective_date,
-                    "ingestion_ts": rate.ingestion_ts,
-                    "currency": rate.currency,
-                }
-                for rate in rates
-            ],
-            many=True,
-        ).data
-
-        cache.set(cache_key, data, CACHE_TTL_SECONDS)
-        return Response({"count": len(data), "results": data, "cached": False})
+        data, cached = self.get_service().get_latest(rate_type)
+        return Response({"count": len(data), "results": data, "cached": cached})
 
 
 class RateHistoryView(APIView):
     pagination_class = HistoryPagination
+    service_class = RateHistoryService
+
+    def get_service(self) -> RateHistoryService:
+        return self.service_class()
 
     def get(self, request):
         provider = request.query_params.get("provider")
@@ -79,31 +52,11 @@ class RateHistoryView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        date_from = request.query_params.get("from")
-        date_to = request.query_params.get("to")
-
-        if date_to:
-            date_to = parse_date(date_to) if isinstance(date_to, str) else date_to
-        else:
-            date_to = timezone.now().date()
-
-        if date_from:
-            date_from = parse_date(date_from) if isinstance(date_from, str) else date_from
-        else:
-            date_from = date_to - timedelta(days=30)
-
-        normalized = normalize_provider_name(provider).lower()
-
-        queryset = (
-            Rate.objects.select_related("provider")
-            .filter(
-                provider__normalized_name=normalized,
-                rate_type=rate_type,
-                effective_date__gte=date_from,
-                effective_date__lte=date_to,
-                rate_value__isnull=False,
-            )
-            .order_by("effective_date", "ingestion_ts")
+        queryset = self.get_service().get_history(
+            provider=provider,
+            rate_type=rate_type,
+            date_from=request.query_params.get("from"),
+            date_to=request.query_params.get("to"),
         )
 
         paginator = HistoryPagination()
@@ -115,6 +68,10 @@ class RateHistoryView(APIView):
 class IngestRateView(APIView):
     authentication_classes = [BearerTokenAuthentication]
     permission_classes = [HasBearerToken]
+    service_class = IngestionService
+
+    def get_service(self) -> IngestionService:
+        return self.service_class()
 
     def post(self, request):
         serializer = IngestRateSerializer(data=request.data)
@@ -125,14 +82,12 @@ class IngestRateView(APIView):
         if "ingestion_ts" not in payload:
             payload["ingestion_ts"] = timezone.now()
 
-        service = IngestionService()
         try:
-            rate = service.ingest_from_api_payload(payload)
-        except ValueError as exc:
-            message = str(exc)
-            if "Duplicate" in message:
-                return Response({"message": message, "status": "duplicate"}, status=status.HTTP_200_OK)
-            return Response({"error": message}, status=status.HTTP_400_BAD_REQUEST)
+            rate = self.get_service().ingest_from_api_payload(payload)
+        except DuplicateRateError as exc:
+            return Response({"message": str(exc), "status": "duplicate"}, status=status.HTTP_200_OK)
+        except InvalidIngestPayloadError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         logger.info(
             "Webhook ingest succeeded",

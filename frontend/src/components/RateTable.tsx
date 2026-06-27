@@ -1,8 +1,6 @@
-import { LatestRate } from "@/lib/api";
+import { LatestRate } from "@/interfaces/rates";
+import { SortDir, SortKey } from "@/interfaces/sort";
 import styles from "./RateTable.module.css";
-
-type SortKey = "rate_value" | "ingestion_ts" | "provider";
-type SortDir = "asc" | "desc";
 
 interface Props {
   rates: LatestRate[];

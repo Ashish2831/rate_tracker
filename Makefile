@@ -22,7 +22,7 @@ test-backend:
 	docker compose exec backend pytest
 
 test-frontend:
-	docker compose exec frontend npm test -- --passWithNoTests
+	docker compose exec frontend npm test
 
 migrate:
 	docker compose exec backend python manage.py migrate

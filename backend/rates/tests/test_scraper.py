@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from rates.services.scraper import fetch_rate_source, parse_http_payload
+from rates.services.adapters.http import parse_http_payload
+from rates.services.scraper import fetch_rate_source
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

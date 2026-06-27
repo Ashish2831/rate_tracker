@@ -9,10 +9,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { HistoryPoint } from "@/interfaces/rates";
 import styles from "./RateChart.module.css";
 
 interface Props {
-  data: { effective_date: string; rate_value: number }[];
+  data: HistoryPoint[];
   provider: string;
   rateType: string;
 }

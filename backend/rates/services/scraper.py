@@ -17,7 +17,7 @@ class ScraperError(Exception):
 
 
 def fetch_rate_source(url: str, session: requests.Session | None = None) -> dict[str, Any]:
-    """Fetch a rate source URL and return structured response metadata."""
+    """Fetch a rate source URL and return structured response metadata (transport only — SRP)."""
     client = session or requests.Session()
     try:
         response: Response = client.get(url, timeout=DEFAULT_TIMEOUT)
@@ -57,24 +57,3 @@ def fetch_rate_source(url: str, session: requests.Session | None = None) -> dict
         "headers": dict(response.headers),
         "body": body,
     }
-
-
-def parse_http_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Parse a JSON HTTP payload into a normalized rate record."""
-    body = payload.get("body")
-    if not isinstance(body, dict):
-        return None
-
-    record = {
-        "provider": body.get("provider"),
-        "rate_type": body.get("rate_type"),
-        "rate_value": body.get("rate_value"),
-        "effective_date": body.get("effective_date"),
-        "ingestion_ts": body.get("ingestion_ts"),
-        "currency": body.get("currency", "USD"),
-        "source_url": payload.get("source_url"),
-        "raw_response_id": body.get("raw_response_id"),
-    }
-    from rates.services.parser import parse_rate_record
-
-    return parse_rate_record(record)

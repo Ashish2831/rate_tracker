@@ -126,7 +126,37 @@ rates_seed.parquet
  Next.js Dashboard (auto-refresh 60s)
 ```
 
-See [schema.md](./schema.md) for database design and [DECISIONS.md](./DECISIONS.md) for engineering rationale.
+See [schema.md](./schema.md) for database design and [DECISIONS.md](./DECISIONS.md) for engineering rationale and SOLID/design-pattern notes.
+
+## Architecture (SOLID)
+
+### Backend
+
+```
+API Views (HTTP only)
+    ├── LatestRatesCacheService  → RateRepository + Redis (Facade)
+    ├── RateHistoryService       → RateRepository
+    └── IngestionService         → RateWriter + RateRecordSource (Strategy)
+
+RateWriter (persist)  →  ProviderResolver + ORM
+ParquetRateSource     →  implements RateRecordSource (Open/Closed)
+adapters/http.py      →  HTTP response → parsed record (Adapter)
+```
+
+### Frontend
+
+```
+page.tsx (composition only)
+    ├── useLatestRates      → fetch + auto-refresh + loading/error (SRP)
+    ├── useRateHistory      → chart data fetch (SRP)
+    ├── useSortableRates    → sort state → sortRates() pure fn (SRP)
+    └── useDefaultProvider  → initial provider selection
+
+lib/ratesApiClient.ts   → default RatesApiClient implementation (DIP)
+lib/sortRates.ts        → pure sort/order utilities (testable without React)
+interfaces/             → all shared types & interfaces (rates, sort, hooks, api client)
+components/             → presentational UI only (RateTable, RateChart, ErrorBanner)
+```
 
 ## Environment Variables
 

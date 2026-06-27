@@ -1,7 +1,11 @@
 import re
 import uuid
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 
 PROVIDER_ALIASES = {
     "hsbc": "HSBC",
@@ -71,3 +75,21 @@ def parse_rate_record(record: dict[str, Any]) -> dict[str, Any] | None:
         "parse_status": "success" if rate_value is not None else "partial",
         "error_message": "" if rate_value is not None else "Invalid or missing rate_value",
     }
+
+
+def coerce_parsed_dates(parsed: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize date fields on a parsed record to Django-compatible types."""
+    effective = parsed["effective_date"]
+    if not isinstance(effective, datetime):
+        effective = parse_date(str(effective))
+    ingestion = parsed["ingestion_ts"]
+    if isinstance(ingestion, str):
+        ingestion = parse_datetime(ingestion)
+    if ingestion and timezone.is_naive(ingestion):
+        ingestion = timezone.make_aware(ingestion, timezone.utc)
+    if not effective or not ingestion:
+        return None
+    parsed["effective_date"] = effective
+    parsed["ingestion_ts"] = ingestion
+    return parsed
+

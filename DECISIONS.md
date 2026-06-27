@@ -2,6 +2,35 @@
 
 Engineering decisions for the Rate Tracker assessment.
 
+## Architecture — SOLID & Design Patterns
+
+| Principle | How it is applied |
+|-----------|-------------------|
+| **S — Single Responsibility** | `parser` transforms data, `scraper` handles HTTP transport, `RateWriter` persists, `IngestionService` orchestrates, views handle HTTP only |
+| **O — Open/Closed** | New data sources implement `RateRecordSource` (Protocol) without modifying `IngestionService` |
+| **L — Liskov Substitution** | `ParquetRateSource` is substitutable anywhere a `RateRecordSource` is expected |
+| **I — Interface Segregation** | Thin `RateRecordSource` protocol; views depend on focused `LatestRatesCacheService` / `RateHistoryService` |
+| **D — Dependency Inversion** | Services accept `RateRepository`, `RateWriter`, and cache invalidators via constructor injection (defaults provided) |
+
+**Design patterns used:**
+
+| Pattern | Location | Purpose |
+|---------|----------|---------|
+| **Repository** | `rates/repositories/rate_repository.py` | Encapsulates ORM queries |
+| **Strategy** | `rates/services/sources.py` | Pluggable record sources (parquet, future HTTP/CSV) |
+| **Adapter** | `rates/services/adapters/http.py` | Maps HTTP scrape responses to parsed records |
+| **Facade** | `rates/services/latest_rates_service.py` | Cache-aside + serialization for latest rates |
+| **Typed exceptions** | `rates/services/exceptions.py` | Explicit error handling instead of string matching |
+
+**Frontend (React SOLID):**
+
+| Principle | Location |
+|-----------|----------|
+| **SRP** | Custom hooks (`useLatestRates`, `useRateHistory`, `useSortableRates`) each own one concern |
+| **DIP** | `RatesApiClient` interface — hooks accept injectable client (defaults to `ratesApiClient`) |
+| **Pure functions** | `lib/sortRates.ts` — sorting logic testable without React (Vitest) |
+| **Composition** | `page.tsx` wires hooks + presentational components only |
+
 ---
 
 ## Assumptions
