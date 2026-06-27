@@ -71,7 +71,9 @@ jobs:
         env:
           IMAGE: ${{ steps.images.outputs.frontend }}
         run: |
-          docker build --platform linux/amd64 -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./frontend
+          docker build --platform linux/amd64 \
+            --build-arg NEXT_PUBLIC_API_URL=/api \
+            -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" ./frontend
           docker push "${IMAGE}:${{ github.sha }}"
           docker push "${IMAGE}:latest"
 

@@ -24,7 +24,9 @@ docker build --platform "${DOCKER_PLATFORM}" -t "${BACKEND}:${IMAGE_TAG}" "${ROO
 docker push "${BACKEND}:${IMAGE_TAG}"
 
 echo "Building frontend -> ${FRONTEND}:${IMAGE_TAG}"
-docker build --platform "${DOCKER_PLATFORM}" -t "${FRONTEND}:${IMAGE_TAG}" "${ROOT}/frontend"
+docker build --platform "${DOCKER_PLATFORM}" \
+  --build-arg NEXT_PUBLIC_API_URL=/api \
+  -t "${FRONTEND}:${IMAGE_TAG}" "${ROOT}/frontend"
 docker push "${FRONTEND}:${IMAGE_TAG}"
 
 echo "Rolling ECS services..."

@@ -26,4 +26,7 @@ if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
   python manage.py migrate --noinput
 fi
 
+echo "Collecting static files..."
+python manage.py collectstatic --noinput
+
 exec "$@"

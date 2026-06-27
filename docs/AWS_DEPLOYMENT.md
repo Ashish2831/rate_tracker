@@ -209,20 +209,6 @@ Also delete the Terraform state S3 bucket and DynamoDB table if no longer needed
 
 ---
 
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---------|----------------|
-| `CannotPullContainerError: ... linux/amd64` | Built on Apple Silicon without `--platform linux/amd64` — re-run `./scripts/aws/push-images.sh` |
-| `DisallowedHost` in backend logs (`10.0.x.x:8000`) | ALB health check uses task IP as Host — rebuild backend after settings fix, redeploy |
-| ECS tasks cycling | No image in ECR yet — push images (Step 4) |
-| Backend unhealthy | RDS/Redis not ready, or migrations failing — check CloudWatch logs |
-| Empty dashboard | Seed not uploaded to S3, or Celery beat not run yet — upload seed, wait 15 min or trigger ingest |
-| CORS errors | `CORS_ALLOWED_ORIGINS` must match browser origin — re-apply Terraform after setting `domain_name` |
-| Deploy workflow auth error | `AWS_ROLE_ARN` secret missing/wrong, or `github_repository` in tfvars must match repo (`Ashish2831/rate_tracker`, not a full URL — URLs are auto-normalized after terraform fix) |
-
----
-
 ## Files reference
 
 | Path | Purpose |
