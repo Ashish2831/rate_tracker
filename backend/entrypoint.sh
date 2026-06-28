@@ -26,6 +26,12 @@ if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
   python manage.py migrate --noinput
 fi
 
+# Build dbt marts when missing (fresh RDS / first deploy). No-op if tables already exist.
+if [ "${RUN_DBT_ON_STARTUP:-true}" = "true" ]; then
+  echo "Ensuring dbt analytics marts exist..."
+  python manage.py run_dbt --if-missing || echo "WARNING: dbt bootstrap failed — run 'manage.py seed_data' manually"
+fi
+
 echo "Collecting static files..."
 python manage.py collectstatic --noinput
 

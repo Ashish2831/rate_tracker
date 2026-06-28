@@ -1,3 +1,6 @@
+# Connection profile — credentials come from env vars (Docker / ECS / CI).
+# Same Postgres database as Django; dbt creates staging/intermediate/analytics schemas.
+
 rate_tracker:
   target: dev
   outputs:
@@ -8,5 +11,5 @@ rate_tracker:
       password: "{{ env_var('POSTGRES_PASSWORD') }}"
       port: "{{ env_var('POSTGRES_PORT', '5432') | as_number }}"
       dbname: "{{ env_var('POSTGRES_DB') }}"
-      schema: public
+      schema: public  # Default schema; models override via +schema in dbt_project.yml
       threads: 4

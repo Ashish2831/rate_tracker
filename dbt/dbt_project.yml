@@ -1,3 +1,6 @@
+# Rate Tracker dbt project — transforms Django raw ingest into analytics marts.
+# Invoked by Django DbtRunner after parquet/webhook ingest (see backend/rates/services/dbt_runner.py).
+
 name: rate_tracker
 version: 1.0.0
 config-version: 2
@@ -13,19 +16,23 @@ clean-targets:
 
 models:
   rate_tracker:
+    # Bronze mirror — thin view over rates_rawresponse (no copy).
     staging:
       +materialized: view
       +schema: staging
+    # Parse, normalize, dedupe — incremental by source_created_at watermark.
     intermediate:
       +schema: intermediate
       int_rates_parsed:
         +materialized: incremental
       int_rates_deduped:
         +materialized: incremental
+    # Read path for Django API — MartRate / MartLatestRate ORM models.
     marts:
       +schema: analytics
       +tags: ["rates_marts"]
       mart_rates:
         +materialized: incremental
+      # Small table (~50 rows) — full rebuild each run is cheap.
       mart_latest_rates:
         +materialized: table

@@ -175,6 +175,37 @@ API health: `http://<alb-dns>/api/health/`
 
 The backend Docker image includes the `dbt/` project at `/dbt`. ECS backend and Celery tasks set `DBT_PROJECT_DIR=/dbt`, `DBT_PROFILES_DIR=/dbt`, and `DBT_RUN_AFTER_INGEST=true`, so `seed_data` and webhook ingest refresh analytics marts automatically.
 
+On container start, `entrypoint.sh` runs `python manage.py run_dbt --if-missing` to create empty mart schemas on a fresh RDS. **You still need to load data once** — APIs read `analytics.mart_*` tables, not raw rows alone.
+
+**First deploy / 500 on `/api/rates/*`:** run a one-off seed task (see below).
+
+### One-off seed (ECS run-task)
+
+When `/api/health/` is OK but rate endpoints return 500 with `relation "analytics.mart_rates" does not exist`, load data:
+
+```bash
+# Get subnets/SG from the backend service (or terraform output)
+CLUSTER=rate-tracker-prod-cluster
+TASK_DEF=rate-tracker-prod-backend
+NET='awsvpcConfiguration={subnets=[subnet-xxx,subnet-yyy],securityGroups=[sg-zzz],assignPublicIp=DISABLED}'
+
+aws ecs run-task \
+  --cluster "$CLUSTER" \
+  --task-definition "$TASK_DEF" \
+  --launch-type FARGATE \
+  --network-configuration "$NET" \
+  --overrides '{"containerOverrides":[{"name":"backend","command":["python","manage.py","seed_data"]}]}'
+
+# Tail logs
+aws logs tail /ecs/rate-tracker-prod/backend --follow
+```
+
+Takes several minutes (~1M raw rows + dbt full refresh). Verify:
+
+```bash
+curl http://YOUR_ALB_DNS/api/rates/latest
+```
+
 ### View logs
 
 ```bash

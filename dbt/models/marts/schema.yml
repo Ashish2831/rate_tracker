@@ -1,14 +1,19 @@
+# Column tests — run via `dbt test` (optional; Django CI skips dbt by default).
+
 version: 2
 
 models:
   - name: stg_raw_responses
+    description: Staging view over Django rates_rawresponse
     columns:
       - name: external_id
+        description: Idempotency key from source (raw_response_id)
         tests:
           - unique
           - not_null
 
   - name: int_rates_parsed
+    description: Typed columns extracted from raw_body JSON
     columns:
       - name: external_id
         tests:
@@ -16,6 +21,7 @@ models:
           - not_null
 
   - name: int_rates_deduped
+    description: Latest row per (provider, rate_type, effective_date)
     columns:
       - name: external_id
         tests:
@@ -23,6 +29,7 @@ models:
           - not_null
 
   - name: mart_rates
+    description: Deduped facts for history and ingested endpoints
     columns:
       - name: external_id
         tests:
@@ -33,6 +40,7 @@ models:
           - not_null
 
   - name: mart_latest_rates
+    description: Latest rate per provider and rate_type for dashboard
     columns:
       - name: normalized_name
         tests:

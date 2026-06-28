@@ -1,3 +1,8 @@
+{#
+  Canonical display names for seed-data casing variants.
+  Mirrors backend/rates/services/parser.py PROVIDER_ALIASES — keep in sync when adding banks.
+  Usage: {{ normalize_provider("raw_body->>'provider'") }}
+#}
 {% macro normalize_provider(column) %}
 case lower(trim({{ column }}))
     when 'hsbc' then 'HSBC'
@@ -10,6 +15,6 @@ case lower(trim({{ column }}))
     when 'capital one' then 'Capital One'
     when 'citibank' then 'Citibank'
     when 'wells fargo' then 'Wells Fargo'
-    else initcap(trim({{ column }}))
+    else initcap(trim({{ column }}))  -- Fallback for unknown providers
 end
 {% endmacro %}

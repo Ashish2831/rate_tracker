@@ -1,3 +1,5 @@
+# Declares Django-owned bronze table as a dbt source (no transformation at this layer).
+
 version: 2
 
 sources:
@@ -6,5 +8,6 @@ sources:
     schema: public
     tables:
       - name: raw_responses
+        # Django model RawResponse → table rates_rawresponse
         identifier: rates_rawresponse
         description: Full parquet/webhook payloads keyed by external_id

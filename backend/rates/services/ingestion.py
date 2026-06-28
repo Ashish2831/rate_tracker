@@ -5,12 +5,13 @@ import uuid
 from typing import Any, Callable
 
 from django.conf import settings
-from django.db import connection, transaction
+from django.db import transaction
 
 from rates.models import RawResponse
 from rates.services.cache import invalidate_rate_caches
 from rates.services.dbt_runner import DbtRunError, DbtRunner
 from rates.services.exceptions import DuplicateRateError, InvalidIngestPayloadError
+from rates.services.mart_bootstrap import marts_exist
 from rates.services.parser import parsed_from_ingest
 from rates.services.rate_writer import RateWriter, WriteStats
 from rates.services.sources import RateRecordSource, create_rate_source
@@ -55,9 +56,7 @@ class IngestionService:
         )
 
     def _marts_exist(self) -> bool:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT to_regclass('analytics.mart_latest_rates') IS NOT NULL")
-            return bool(cursor.fetchone()[0])
+        return marts_exist()
 
     def _refresh_marts(self) -> None:
         if not settings.DBT_RUN_AFTER_INGEST:

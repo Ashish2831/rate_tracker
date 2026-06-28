@@ -1,3 +1,4 @@
+# dbt build artifacts — regenerated on each `dbt run`
 target/
 dbt_packages/
 logs/

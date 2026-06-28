@@ -1,3 +1,9 @@
+{#
+  One row per (provider, rate_type) — powers GET /api/rates/latest.
+  Django MartLatestRate ORM reads analytics.mart_latest_rates.
+
+  Full table rebuild each run (~50 rows) — simpler than incremental for this grain.
+#}
 {{
   config(
     materialized='table',
