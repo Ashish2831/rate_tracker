@@ -71,6 +71,19 @@ TF_STATE_BUCKET=ashish-rate-tracker-tfstate AWS_REGION=ap-south-1 ./scripts/aws/
 
 Follow the printed `terraform init` command (S3 bucket + DynamoDB lock table).
 
+> **New machine / clone:** You must run `terraform init` with `-backend-config=...` before every `plan` or `apply`. If you see `Backend initialization required`, run init again — it does not run automatically.
+
+Example (replace bucket/table with bootstrap output or `rate-tracker-tfstate-ap-south-1-<account-id>`):
+
+```bash
+terraform init \
+  -backend-config="bucket=rate-tracker-tfstate-ap-south-1-$(aws sts get-caller-identity --query Account --output text)" \
+  -backend-config="key=prod/terraform.tfstate" \
+  -backend-config="region=ap-south-1" \
+  -backend-config="dynamodb_table=rate-tracker-tf-locks-ap_south_1" \
+  -backend-config="encrypt=true"
+```
+
 ---
 
 ## Step 2 — Provision infrastructure
@@ -169,7 +182,63 @@ API health: `http://<alb-dns>/api/health/`
 
 ---
 
+## Step 7 — Load production data (required once)
+
+Uploading parquet to S3 alone does **not** populate the dashboard. The API reads **dbt marts** (`analytics.mart_*`), not raw rows.
+
+After images are deployed and ECS tasks are running:
+
+```bash
+# Discover network config from the backend service
+NET=$(aws ecs describe-services \
+  --cluster rate-tracker-prod-cluster \
+  --services rate-tracker-prod-backend \
+  --query 'services[0].networkConfiguration.awsvpcConfiguration' \
+  --output json)
+
+SUBNETS=$(echo "$NET" | jq -r '.subnets | join(",")')
+SG=$(echo "$NET" | jq -r '.securityGroups[0]')
+
+aws ecs run-task \
+  --cluster rate-tracker-prod-cluster \
+  --task-definition rate-tracker-prod-backend \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
+  --overrides '{"containerOverrides":[{"name":"backend","command":["python","manage.py","seed_data"]}]}'
+
+aws logs tail /ecs/rate-tracker-prod/backend --follow
+```
+
+Takes several minutes (~1M raw rows + dbt full refresh). Verify:
+
+```bash
+curl "http://$(terraform output -raw alb_dns_name)/api/rates/latest"
+```
+
+Re-runs are idempotent (duplicates skipped at raw layer).
+
+---
+
 ## Operations
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| `/api/health/` OK, `/api/rates/*` → **500** | dbt marts missing (`relation "analytics.mart_rates" does not exist`) | Run **Step 7** seed task; ensure backend image includes `/dbt` and `DBT_*` env vars (`terraform apply`) |
+| `terraform apply` → backend init error | S3 backend not initialized | Run `terraform init` with `-backend-config` (Step 2) |
+| Dashboard empty, APIs return `count: 0` | Marts exist but no seed yet | Run **Step 7** |
+| Seed fails: `timezone.utc` / parse errors | Old backend image | Redeploy latest backend image |
+| Celery not ingesting | Worker/beat not running or parquet missing | Check `aws logs tail /ecs/rate-tracker-prod/celery-worker --follow` |
+
+CloudWatch error filter:
+
+```bash
+aws logs filter-log-events \
+  --log-group-name /ecs/rate-tracker-prod/backend \
+  --filter-pattern "Internal Server Error" \
+  --limit 5
+```
 
 ### dbt in production
 
@@ -181,30 +250,58 @@ On container start, `entrypoint.sh` runs `python manage.py run_dbt --if-missing`
 
 ### One-off seed (ECS run-task)
 
-When `/api/health/` is OK but rate endpoints return 500 with `relation "analytics.mart_rates" does not exist`, load data:
+When `/api/health/` is OK but rate endpoints return 500 with `relation "analytics.mart_rates" does not exist`, load data (or use **Step 7** above):
 
 ```bash
-# Get subnets/SG from the backend service (or terraform output)
 CLUSTER=rate-tracker-prod-cluster
 TASK_DEF=rate-tracker-prod-backend
-NET='awsvpcConfiguration={subnets=[subnet-xxx,subnet-yyy],securityGroups=[sg-zzz],assignPublicIp=DISABLED}'
+
+NET=$(aws ecs describe-services --cluster "$CLUSTER" --services rate-tracker-prod-backend \
+  --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json)
+SUBNETS=$(echo "$NET" | jq -r '.subnets | join(",")')
+SG=$(echo "$NET" | jq -r '.securityGroups[0]')
 
 aws ecs run-task \
   --cluster "$CLUSTER" \
   --task-definition "$TASK_DEF" \
   --launch-type FARGATE \
-  --network-configuration "$NET" \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=DISABLED}" \
   --overrides '{"containerOverrides":[{"name":"backend","command":["python","manage.py","seed_data"]}]}'
 
-# Tail logs
 aws logs tail /ecs/rate-tracker-prod/backend --follow
 ```
+
+To refresh marts only (raw already loaded): override command with `python manage.py run_dbt --full-refresh`.
 
 Takes several minutes (~1M raw rows + dbt full refresh). Verify:
 
 ```bash
-curl http://YOUR_ALB_DNS/api/rates/latest
+curl "http://$(cd infra/terraform && terraform output -raw alb_dns_name)/api/rates/latest"
 ```
+
+### Pause stack (save cost)
+
+Scale compute to zero and stop RDS when not demoing:
+
+```bash
+CLUSTER=rate-tracker-prod-cluster
+PREFIX=rate-tracker-prod
+
+for svc in backend frontend celery-worker celery-beat; do
+  aws ecs update-service --cluster "$CLUSTER" --service "${PREFIX}-${svc}" --desired-count 0
+done
+
+aws rds stop-db-instance --db-instance-identifier "${PREFIX}-postgres"
+```
+
+Resume:
+
+```bash
+aws rds start-db-instance --db-instance-identifier rate-tracker-prod-postgres
+# wait until available, then scale ECS services back to desired-count 1
+```
+
+NAT Gateway and ALB still bill (~$50/month) while paused. Full teardown: `terraform destroy`.
 
 ### View logs
 
@@ -254,4 +351,7 @@ Also delete the Terraform state S3 bucket and DynamoDB table if no longer needed
 | `scripts/aws/bootstrap-state.sh` | One-time remote state setup |
 | `scripts/aws/deploy-ecs.sh` | ECS task definition rolling update |
 | `scripts/aws/upload-seed.sh` | Upload parquet to S3 |
-| `backend/rates/api/health.py` | ALB health check endpoint |
+| `backend/Dockerfile` | Built from repo root — includes `dbt/` at `/dbt` |
+| `backend/entrypoint.sh` | Migrations + `run_dbt --if-missing` on startup |
+| `backend/rates/api/health.py` | ALB health check (Postgres + Redis only) |
+| `dbt/` | SQL models — staging, intermediate, analytics marts |

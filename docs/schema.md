@@ -271,6 +271,15 @@ Stats: skipped_duplicates += 1
 
 ---
 
+## Django migrations
+
+| Migration | Purpose |
+|-----------|---------|
+| `0001_initial` | Creates `rates_rawresponse` (bronze) |
+| `0002_unmanaged_mart_models` | Registers `MartRate` / `MartLatestRate` in Django state only (`managed=False`) — tables are created by dbt, not Django |
+
+---
+
 ## Legacy note
 
-Earlier iterations used Django-owned `rates_provider` and `rates_rate` tables. These were removed in migration `0002_drop_legacy_transform_tables` — all transform logic now lives in dbt marts under the `analytics` schema.
+Earlier iterations used Django-owned `rates_provider` and `rates_rate` tables. Those were removed — all transform logic now lives in dbt marts under the `analytics` schema. Django never creates mart DDL; `python manage.py run_dbt` (or `seed_data`) builds them.

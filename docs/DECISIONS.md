@@ -25,7 +25,8 @@ The parquet file includes `source_url` and `raw_response_id` fields as if data w
 | Path | What it does |
 |------|--------------|
 | `python manage.py seed_data` | Reads parquet into `rates_rawresponse`, then runs dbt |
-| `python manage.py run_dbt` | Refreshes staging → marts (incremental or `--full-refresh`) |
+| `python manage.py run_dbt` | Refreshes staging → marts (`--full-refresh`, `--if-missing`) |
+| `backend/entrypoint.sh` | Migrate + `run_dbt --if-missing` on container start |
 | `rates/services/scraper.py` | HTTP transport (timeouts, 503 errors) |
 | `rates/services/parser.py` | Webhook validation + `parse_scrape_payload()` for HTTP adapter |
 | `dbt/models/` | SQL transforms: parse, dedupe, marts |
@@ -153,6 +154,22 @@ Celery Beat → fetch https://chase.com/rates → parse → store
 ```
 
 Using parquet for the demo avoids dependency on external sites being up during review.
+
+---
+
+### 6. Health check ≠ rate API readiness (AWS)
+
+`GET /api/health/` only verifies Postgres and Redis. All rate endpoints read **dbt marts** (`analytics.mart_rates`, `analytics.mart_latest_rates`). On a fresh RDS deploy, health returns 200 while `/api/rates/latest` returns 500 until marts exist.
+
+**Mitigations shipped:**
+
+| Layer | Behavior |
+|-------|----------|
+| `entrypoint.sh` | After migrate, runs `python manage.py run_dbt --if-missing` (creates mart DDL on empty DB) |
+| First data load | One-off ECS task: `python manage.py seed_data` (raw + dbt full refresh) |
+| Ongoing | `DBT_RUN_AFTER_INGEST=true` on ingest and Celery schedule |
+
+Uploading parquet to S3 alone does not populate marts — the seed command must run inside a backend container. See [AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md) Step 7 and [Troubleshooting](AWS_DEPLOYMENT.md#troubleshooting).
 
 ---
 
@@ -433,6 +450,35 @@ Implementation sketch (still no external IdP required for v1):
 
 Read endpoints stay public; only ingest moves from static bearer → JWT. Webhook callers would fetch or receive a JWT instead of a forever-shared string.
 
+### Tertiary: AI-assisted data quality and ops (not in scope for take-home)
+
+**Current approach:**
+
+All quality rules are **deterministic** — dbt SQL filters, schema tests, webhook validation, idempotent raw ingest. Ops rely on structured JSON logs and manual CloudWatch queries.
+
+**Where AI would add value (without replacing core ETL):**
+
+| Use case | What it would do | Why not in v1 |
+|----------|------------------|---------------|
+| **Rate anomaly alerts** | After each dbt run, flag rows where `rate_value` deviates > N σ from a 30-day rolling mean per `(provider, rate_type)` | Needs baseline tuning; false positives on legitimate market moves |
+| **Ingest payload triage** | Classify failed webhook bodies (`missing field` vs `wrong type` vs `unknown provider`) and suggest fixes from `raw_body` | Adds LLM latency/cost on hot path; deterministic parser errors suffice for demo |
+| **Schema drift detection** | Compare incoming parquet/webhook keys to expected schema; surface diffs before rows hit bronze | Seed file is fixed; production would benefit when providers change JSON shape |
+| **Ops copilot** | Natural language → CloudWatch Insights / log query for `ingestion_error`, `dbt_error`, `http_parse_failed` | Nice for on-call; not required when log volume is low |
+
+**Example — anomaly hook after dbt (sketch):**
+
+```
+dbt run completes
+  → post-hook job reads new rows in analytics.mart_rates
+  → for each (provider, rate_type): compare rate_value to rolling 30d stats
+  → if |z-score| > 3: emit alert { provider, rate_type, rate_value, expected_range }
+  → dashboard shows “review” badge — human confirms before any auto-exclusion
+```
+
+**Design principle:** AI for **observability and triage**, not for dedupe, idempotency, or mart logic — those stay in versioned SQL (dbt) where behavior is testable and replayable.
+
+*“I’d keep transforms in dbt and use ML/LLM only on the edges — anomaly detection on marts and faster incident response — with humans in the loop for anything that changes what customers see.”*
+
 ---
 
 ## Caching Strategy
@@ -563,7 +609,7 @@ Steady read traffic   → cache refreshed on miss; TTL resets on each set()
 
 ---
 
-## Production mapping (interview framing)
+## Production mapping
 
 This take-home runs locally via Docker Compose. In a Forbes Advisor / Marketplace production stack, the same boundaries map as follows:
 

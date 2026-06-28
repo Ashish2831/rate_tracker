@@ -78,7 +78,7 @@ make test-backend
 make test-frontend
 ```
 
-Without Docker, unit tests only (25 backend + 20 frontend — API tests need Postgres):
+Without Docker, unit tests only (26 backend + 20 frontend — API tests need Postgres):
 
 ```bash
 cd backend && python3 -m pytest rates/tests/test_parser.py rates/tests/test_services.py rates/tests/test_scraper.py
@@ -100,7 +100,8 @@ make logs
 | `make down` | Stop containers |
 | `make build` | Rebuild Docker images |
 | `make seed` | Load parquet into raw tables + run dbt marts |
-| `make dbt` | Re-run dbt mart models only |
+| `make dbt` | Re-run dbt mart models only (incremental) |
+| `make dbt-full` | Rebuild all dbt models from scratch |
 | `make test` | Run backend pytest + frontend Vitest |
 | `make test-backend` | Backend pytest only (in Docker) |
 | `make test-frontend` | Frontend Vitest only (in Docker) |
@@ -219,6 +220,7 @@ Copy `.env.example` to `.env`. All required variables are documented there. The 
 
 ```
 ├── backend/           # Django + DRF + Celery
+├── dbt/               # dbt models (staging → marts)
 ├── frontend/          # Next.js dashboard
 ├── data/              # rates_seed.parquet
 ├── docs/              # SCHEMA.md, DECISIONS.md, AWS_DEPLOYMENT.md, INGEST_WEBHOOK.md
@@ -272,7 +274,7 @@ See [docs/DECISIONS.md](./docs/DECISIONS.md#caching-strategy) for flow examples 
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on push/PR to `main`:
 
-- **Backend:** Postgres + Redis services, migrations, full pytest suite (36 tests)
+- **Backend:** Postgres + Redis services, migrations, full pytest suite (38 tests)
 - **Frontend:** ESLint, Vitest, production `next build`
 
 CI sets `DBT_RUN_AFTER_INGEST=false`; API tests seed mart tables via test helpers instead of running dbt.
@@ -281,15 +283,19 @@ CI sets `DBT_RUN_AFTER_INGEST=false`; API tests seed mart tables via test helper
 
 Production deployment to **ECS Fargate + RDS + ElastiCache + ALB** in **`ap-south-1` (Mumbai)** with automated deploy on merge to `main`.
 
-The backend image is built from the **repo root** (`docker build -f backend/Dockerfile .`) so the dbt project is baked in at `/dbt`. ECS tasks receive `DBT_PROJECT_DIR`, `DBT_PROFILES_DIR`, and `DBT_RUN_AFTER_INGEST=true`.
+The backend image is built from the **repo root** (`docker build -f backend/Dockerfile .`) so the dbt project is baked in at `/dbt`. ECS tasks receive `DBT_PROJECT_DIR`, `DBT_PROFILES_DIR`, and `DBT_RUN_AFTER_INGEST=true`. On startup, `entrypoint.sh` runs `run_dbt --if-missing` so mart tables exist on fresh RDS (empty until seeded).
 
 See **[docs/AWS_DEPLOYMENT.md](./docs/AWS_DEPLOYMENT.md)** for the full guide. Summary:
 
 1. `./scripts/aws/bootstrap-state.sh` — create Terraform remote state
-2. `terraform apply` in `infra/terraform/` — provision VPC, RDS, Redis, ECS, ALB, ECR
+2. `terraform init` + `terraform apply` in `infra/terraform/` — VPC, RDS, Redis, ECS, ALB, ECR
 3. Upload seed parquet to S3
-4. Set GitHub secret `AWS_ROLE_ARN` (from Terraform output)
-5. Push to `main` → **CI** runs tests → **Deploy** builds images, pushes ECR, rolls ECS
+4. Push Docker images (`scripts/aws/push-images.sh` or GitHub Deploy)
+5. **Run one-off ECS seed task** — required once so `/api/rates/*` has data (health alone is not enough)
+6. Set GitHub secret `AWS_ROLE_ARN` (from Terraform output)
+7. Push to `main` → **CI** runs tests → **Deploy** builds images, pushes ECR, rolls ECS
+
+**Production 500 on rate APIs?** Health can pass while dbt marts are missing. See [AWS_DEPLOYMENT.md — Troubleshooting](./docs/AWS_DEPLOYMENT.md#troubleshooting).
 
 | Workflow | File | Trigger |
 |----------|------|---------|

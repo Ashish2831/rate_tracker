@@ -1,16 +1,11 @@
-/** Shared provider and rate-type filter dropdowns (server-side filtering via API). */
+/** Shared provider and rate-type filters with search (server-side filtering via API). */
 
+import { useMemo } from "react";
+
+import { SearchableFilter } from "@/components/dashboard/SearchableFilter";
+import { FilterToolbarProps } from "@/interfaces/filters";
 import { formatRateType } from "@/lib/format";
 import styles from "@/app/page.module.css";
-
-interface Props {
-  providers: string[];
-  rateTypes: string[];
-  providerFilter: string;
-  typeFilter: string;
-  onProviderChange: (value: string) => void;
-  onTypeChange: (value: string) => void;
-}
 
 export function FilterToolbar({
   providers,
@@ -19,39 +14,37 @@ export function FilterToolbar({
   typeFilter,
   onProviderChange,
   onTypeChange,
-}: Props) {
+}: FilterToolbarProps) {
+  // Map API strings to { value, label } pairs for the combobox.
+  const providerOptions = useMemo(
+    () => providers.map((provider) => ({ value: provider, label: provider })),
+    [providers],
+  );
+  const rateTypeOptions = useMemo(
+    () =>
+      rateTypes.map((rateType) => ({
+        value: rateType,
+        label: formatRateType(rateType),
+      })),
+    [rateTypes],
+  );
+
   return (
     <section className={styles.toolbar} aria-label="Filters">
-      <label className={styles.toolbarLabel}>
-        Provider
-        <select
-          className={styles.select}
-          value={providerFilter}
-          onChange={(e) => onProviderChange(e.target.value)}
-        >
-          <option value="">All providers</option>
-          {providers.map((provider) => (
-            <option key={provider} value={provider}>
-              {provider}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className={styles.toolbarLabel}>
-        Rate type
-        <select
-          className={styles.select}
-          value={typeFilter}
-          onChange={(e) => onTypeChange(e.target.value)}
-        >
-          <option value="">All types</option>
-          {rateTypes.map((rateType) => (
-            <option key={rateType} value={rateType}>
-              {formatRateType(rateType)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SearchableFilter
+        label="Provider"
+        allLabel="All providers"
+        options={providerOptions}
+        value={providerFilter}
+        onChange={onProviderChange}
+      />
+      <SearchableFilter
+        label="Rate type"
+        allLabel="All types"
+        options={rateTypeOptions}
+        value={typeFilter}
+        onChange={onTypeChange}
+      />
     </section>
   );
 }
