@@ -12,7 +12,7 @@ Use this guide to demonstrate each requirement live (terminal + browser) or in a
 make up-lite
 # or: docker compose up -d postgres redis backend frontend
 
-export TOKEN="dev-ingest-token-change-me"   # INGEST_BEARER_TOKEN from .env
+export TOKEN=$(grep '^INGEST_BEARER_TOKEN=' .env | cut -d= -f2-)   # INGEST_BEARER_TOKEN from .env
 export API="http://localhost:8000/api"
 ```
 

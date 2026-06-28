@@ -301,13 +301,3 @@ See **[docs/AWS_DEPLOYMENT.md](./docs/AWS_DEPLOYMENT.md)** for the full guide. S
 |----------|------|---------|
 | CI | `.github/workflows/ci.yml` | Push/PR to `main` |
 | Deploy | `.github/workflows/deploy.yml` | CI success on `main`, or manual |
-
-## Submission checklist
-
-Before sending to the reviewer:
-
-- [ ] Private GitHub repo shared with assessors
-- [ ] Loom walkthrough (architecture, tradeoffs, demo)
-- [ ] `docker compose up --build` verified end-to-end (seed + dashboard)
-- [ ] `make test` passes with stack running
-- [ ] `.env` uses non-default secrets for any shared environment
