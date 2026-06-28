@@ -67,6 +67,23 @@ resource "aws_lb_listener_rule" "api" {
   }
 }
 
+# Django admin CSS/JS (WhiteNoise) — without this, /static/* falls through to Next.js.
+resource "aws_lb_listener_rule" "static" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 15
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/static/*"]
+    }
+  }
+}
+
 resource "aws_lb_listener_rule" "admin" {
   listener_arn = aws_lb_listener.http.arn
   priority     = 20

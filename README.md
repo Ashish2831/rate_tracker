@@ -146,7 +146,7 @@ curl -X POST http://localhost:8000/api/rates/ingest \
 Parquet / webhook
        │
        ▼
-  Django ingest (raw-only) ──► rates_rawresponse  (bronze)
+  Django ingest (raw-only) ──► rates_rawresponse
        │
        ▼
   dbt run (stg → int → mart) ──► analytics.mart_rates / mart_latest_rates

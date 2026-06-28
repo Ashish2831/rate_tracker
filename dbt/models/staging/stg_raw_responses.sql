@@ -1,4 +1,4 @@
--- Staging view: pass-through from Django bronze with stable column names for downstream models.
+-- Staging view: pass-through from rates_rawresponse with stable column names for downstream models.
 -- Materialized as view (see dbt_project.yml) — always reflects current raw rows.
 
 select

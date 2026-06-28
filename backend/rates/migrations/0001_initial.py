@@ -1,4 +1,4 @@
-# Fresh initial migration — Django owns raw bronze only; dbt owns analytics marts.
+# Fresh initial migration — Django owns raw ingest only; dbt owns analytics marts.
 
 import uuid
 

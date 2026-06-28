@@ -8,7 +8,7 @@ The schema splits **online ingest** (Django) from **warehouse transforms** (dbt)
 Parquet / webhook
         │
         ▼
-  rates_rawresponse          ← Django bronze (public schema)
+  rates_rawresponse          ← Django raw ingest (public schema)
         │
         ▼  dbt run (after each ingest)
   staging.stg_raw_responses
@@ -30,7 +30,7 @@ Parquet / webhook
 
 ---
 
-## Django-owned table (bronze)
+## Django-owned raw table
 
 ### `rates_rawresponse`
 
@@ -45,7 +45,7 @@ Parquet / webhook
 | `error_message` | text | Parse/validation errors |
 | `created_at` | timestamptz, indexed | Incremental watermark for dbt |
 
-**Purpose:** Immutable bronze layer. Every distinct `external_id` is stored once; re-runs skip duplicates at this layer.
+**Purpose:** Immutable raw ingest. Every distinct `external_id` is stored once; re-runs skip duplicates at this layer.
 
 #### Example — parquet row stored as-is
 
@@ -113,7 +113,7 @@ One row per `(normalized_name, rate_type, effective_date)` — keeps the observa
 | `rate_type` | varchar(64), indexed | e.g. `30yr_fixed_mortgage` |
 | `rate_value` | numeric(8,4) | Non-null only (partial rows excluded) |
 | `effective_date` | date, indexed | Business date of the rate |
-| `ingestion_ts` | timestamptz, indexed | When record was ingested |
+| `ingestion_ts` | timestamptz, indexed | When record was ingested (UTC in DB; window uses `DJANGO_TIME_ZONE`) |
 | `currency` | varchar(3) | ISO currency code |
 | `external_id` | varchar(64) UNIQUE | Lineage back to raw payload |
 
@@ -135,7 +135,7 @@ Powers `GET /api/rates/latest` and filter dropdowns.
 | `"Hsbc"` | HSBC | hsbc |
 | `"HSBC"` | HSBC | hsbc |
 
-All three raw payloads may exist in bronze; dedupe keeps the latest observation per business key in the mart.
+All three raw payloads may exist in `rates_rawresponse`; dedupe keeps the latest observation per business key in the mart.
 
 ---
 
@@ -190,17 +190,17 @@ ORDER BY effective_date, ingestion_ts;
 
 ### 3. All records ingested in a given 24-hour window
 
-**Question:** "What did our ingestion pipeline load between midnight and midnight yesterday?"
+**Question:** "What did our ingestion pipeline load in the last 24 hours?"
 
 ```sql
 SELECT provider_name, rate_type, rate_value, effective_date, ingestion_ts
 FROM analytics.mart_rates
-WHERE ingestion_ts >= '2025-06-01 00:00:00'
-  AND ingestion_ts <  '2025-06-02 00:00:00'
+WHERE ingestion_ts >= NOW() - INTERVAL '24 hours'
+  AND ingestion_ts < NOW()
 ORDER BY ingestion_ts DESC;
 ```
 
-**Example use:** Ops/debugging — verifying that last night's Celery job ingested data as expected. Powers `GET /api/rates/ingested`.
+**Example use:** Ops/debugging — verifying recent ingest activity. Powers `GET /api/rates/ingested` (default window uses `DJANGO_TIME_ZONE`, e.g. `Asia/Kolkata`).
 
 ---
 
@@ -232,7 +232,7 @@ make dbt-full   # rebuild all incremental models
 | Provider columns on mart (not separate table) | Normalization in SQL macro; no Django FK wiring | `"hsbc"`, `"Hsbc"`, `"HSBC"` → `provider_name: HSBC` |
 | `external_id` uniqueness on raw | Idempotent ingest at payload level | `raw_response_id: "abc-123"` inserted once; re-run skipped |
 | Dedupe in dbt, not Python | All raw rows preserved; business logic in one SQL layer | ~852K raw → ~27K mart rows after dedupe |
-| Exclude null `rate_value` from marts | Partial rows stay in bronze for replay | Null rate in raw_body → not in `mart_rates` |
+| Exclude null `rate_value` from marts | Partial rows stay in raw for replay | Null rate in raw_body → not in `mart_rates` |
 | `mart_latest_rates` table rebuild | Only ~50 rows; simpler than incremental latest logic | `/latest` is O(1) per row on cache miss |
 | JSONB for `raw_body` | Flexible storage; supports replay without re-scrape | Full parquet row preserved regardless of parse outcome |
 
@@ -275,7 +275,7 @@ Stats: skipped_duplicates += 1
 
 | Migration | Purpose |
 |-----------|---------|
-| `0001_initial` | Creates `rates_rawresponse` (bronze) |
+| `0001_initial` | Creates `rates_rawresponse` (raw ingest) |
 | `0002_unmanaged_mart_models` | Registers `MartRate` / `MartLatestRate` in Django state only (`managed=False`) — tables are created by dbt, not Django |
 
 ---

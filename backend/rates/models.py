@@ -1,4 +1,4 @@
-"""Django ORM models — raw ingest (bronze) and dbt mart mirrors (read-only)."""
+"""Django ORM models — raw ingest and dbt mart mirrors (read-only)."""
 
 import uuid
 

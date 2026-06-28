@@ -90,7 +90,7 @@ def test_ingested_rates_service_resolve_window_defaults():
     assert window_to is not None
     assert window_from is not None
     assert window_to - window_from == timedelta(hours=24)
-    assert abs((timezone.now() - window_to).total_seconds()) < 5
+    assert abs((timezone.localtime() - window_to).total_seconds()) < 5
 
 
 def test_ingested_rates_service_resolve_window_invalid():

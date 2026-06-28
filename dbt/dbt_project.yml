@@ -16,7 +16,7 @@ clean-targets:
 
 models:
   rate_tracker:
-    # Bronze mirror — thin view over rates_rawresponse (no copy).
+    # Staging mirror — thin view over rates_rawresponse (no copy).
     staging:
       +materialized: view
       +schema: staging

@@ -49,6 +49,7 @@ locals {
     { name = "POSTGRES_PORT", value = "5432" },
     { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379/0" },
     { name = "DJANGO_DEBUG", value = "false" },
+    { name = "DJANGO_TIME_ZONE", value = "Asia/Kolkata" },
     { name = "DJANGO_ALLOWED_HOSTS", value = join(",", compact([aws_lb.main.dns_name, var.domain_name, "localhost", "*"])) },
     { name = "CORS_ALLOWED_ORIGINS", value = local.app_url },
     { name = "SEED_PARQUET_PATH", value = "/data/rates_seed.parquet" },

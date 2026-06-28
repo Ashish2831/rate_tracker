@@ -21,11 +21,11 @@ class IngestedRatesService:
         window_to: str | datetime | None,
         default_hours: int = 24,
     ) -> tuple[datetime, datetime]:
-        """Default to the last 24 hours when ?from/?to are omitted."""
+        """Default to the last 24 hours in the configured Django TIME_ZONE."""
         if window_to:
             resolved_to = parse_datetime(window_to) if isinstance(window_to, str) else window_to
         else:
-            resolved_to = timezone.now()
+            resolved_to = timezone.localtime()
 
         if window_from:
             resolved_from = parse_datetime(window_from) if isinstance(window_from, str) else window_from

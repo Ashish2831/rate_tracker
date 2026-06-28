@@ -1,6 +1,7 @@
-"""Django admin — raw bronze layer and dbt mart inspection (read-only)."""
+"""Django admin — raw ingest table and dbt mart inspection (read-only)."""
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.utils import timezone
 
 from rates.models import MartLatestRate, MartRate, RawResponse
 
@@ -13,6 +14,21 @@ class RawResponseAdmin(admin.ModelAdmin):
     list_filter = ("parse_status",)
     search_fields = ("external_id", "source_url")
     date_hierarchy = "fetched_at"
+
+    def save_model(self, request, obj, form, change):
+        """Stamp ingestion_ts to now (UTC) so ingested 24h window matches admin intent."""
+        now = timezone.now()
+        body = dict(obj.raw_body or {})
+        body["ingestion_ts"] = now.isoformat()
+        obj.raw_body = body
+        if not obj.fetched_at:
+            obj.fetched_at = now
+        super().save_model(request, obj, form, change)
+        messages.info(
+            request,
+            "Raw row saved. Run `python manage.py run_dbt` (or wait for ingest pipeline) "
+            "before expecting the row on the dashboard.",
+        )
 
 
 @admin.register(MartRate)

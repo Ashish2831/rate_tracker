@@ -14,6 +14,7 @@ Deploy Rate Tracker to **AWS ECS Fargate** with **RDS PostgreSQL**, **ElastiCach
               └───┬─────────────────┬───┘
                   │                 │
          /api/*   │                 │  /*
+         /static/*│                 │
          /admin/* │                 │
                   ▼                 ▼
          ┌──────────────┐   ┌──────────────┐
@@ -230,6 +231,7 @@ Re-runs are idempotent (duplicates skipped at raw layer).
 | Dashboard empty, APIs return `count: 0` | Marts exist but no seed yet | Run **Step 7** |
 | Seed fails: `timezone.utc` / parse errors | Old backend image | Redeploy latest backend image |
 | Celery not ingesting | Worker/beat not running or parquet missing | Check `aws logs tail /ecs/rate-tracker-prod/celery-worker --follow` |
+| Django `/admin/` unstyled (no CSS) | ALB default action sends `/static/*` to Next.js | `terraform apply` (listener rule `/static/*` → backend); verify `curl http://<alb>/static/admin/css/base.css` returns 200 |
 
 CloudWatch error filter:
 

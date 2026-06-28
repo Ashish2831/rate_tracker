@@ -1,10 +1,10 @@
-# Declares Django-owned bronze table as a dbt source (no transformation at this layer).
+# Declares Django-owned raw table as a dbt source (no transformation at this layer).
 
 version: 2
 
 sources:
   - name: rates
-    description: Django-owned bronze layer — immutable scrape payloads
+    description: Django-owned raw ingest — immutable scrape payloads
     schema: public
     tables:
       - name: raw_responses

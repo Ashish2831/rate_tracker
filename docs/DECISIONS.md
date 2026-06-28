@@ -95,7 +95,7 @@ Chase | 30yr_fixed_mortgage | 2025-05-15 | 2025-05-16 09:00 | 6.48
 
 ---
 
-### 4. Invalid rates are excluded from marts but preserved in bronze
+### 4. Invalid rates are excluded from marts but preserved in raw ingest
 
 Rows with null or non-positive `rate_value` remain in `rates_rawresponse.raw_body`. dbt excludes them from `analytics.mart_rates` (`WHERE rate_value IS NOT NULL`). Webhook ingest still validates before writing raw and rejects bad payloads with `400`.
 
@@ -462,7 +462,7 @@ All quality rules are **deterministic** — dbt SQL filters, schema tests, webho
 |----------|------------------|---------------|
 | **Rate anomaly alerts** | After each dbt run, flag rows where `rate_value` deviates > N σ from a 30-day rolling mean per `(provider, rate_type)` | Needs baseline tuning; false positives on legitimate market moves |
 | **Ingest payload triage** | Classify failed webhook bodies (`missing field` vs `wrong type` vs `unknown provider`) and suggest fixes from `raw_body` | Adds LLM latency/cost on hot path; deterministic parser errors suffice for demo |
-| **Schema drift detection** | Compare incoming parquet/webhook keys to expected schema; surface diffs before rows hit bronze | Seed file is fixed; production would benefit when providers change JSON shape |
+| **Schema drift detection** | Compare incoming parquet/webhook keys to expected schema; surface diffs before rows hit raw ingest | Seed file is fixed; production would benefit when providers change JSON shape |
 | **Ops copilot** | Natural language → CloudWatch Insights / log query for `ingestion_error`, `dbt_error`, `http_parse_failed` | Nice for on-call; not required when log volume is low |
 
 **Example — anomaly hook after dbt (sketch):**
