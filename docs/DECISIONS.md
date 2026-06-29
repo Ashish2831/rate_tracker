@@ -359,18 +359,6 @@ COPY rates_staging FROM '/tmp/rates.csv' WITH (FORMAT csv);
 
 ### Implemented: dbt mart layer + `mart_latest_rates`
 
-**Current approach (shipped):**
-
-Django writes raw-only; dbt builds incremental models and a pre-computed latest table:
-
-```sql
-SELECT * FROM analytics.mart_latest_rates;  -- ~50 rows, powers GET /latest
-```
-
-`mart_latest_rates` is rebuilt on every dbt run (~0.06s). Redis cache-aside (60s TTL) wraps the read path.
-
-**Remaining gap:** On cache miss, history/ingested still scan `mart_rates` (~27K rows). Further optimization would add date-partitioned marts or BRIN indexes on `ingestion_ts`.
-
 ### Primary: WebSocket push instead of 60-second polling
 
 **Current frontend behavior:**
