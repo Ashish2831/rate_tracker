@@ -301,3 +301,17 @@ See **[docs/AWS_DEPLOYMENT.md](./docs/AWS_DEPLOYMENT.md)** for the full guide. S
 |----------|------|---------|
 | CI | `.github/workflows/ci.yml` | Push/PR to `main` |
 | Deploy | `.github/workflows/deploy.yml` | CI success on `main`, or manual |
+
+## AI tools disclosure
+
+In accordance with the guidelines, the following AI-assisted tooling was used during development.
+
+**Tool:** [Cursor](https://cursor.com) (IDE with integrated AI assistant).
+
+**Role:** Cursor was used as a development accelerator—for boilerplate generation, pattern reference, initial documentation drafts, and troubleshooting support. It was not integrated into the application runtime (ingest, API, or dashboard).
+
+| Area | Author responsibility | AI assistance |
+|------|----------------------|---------------|
+| Architecture | Raw ingest + dbt marts, caching strategy, background jobs | Alternative approaches for comparison |
+| Implementation | Backend services, API, frontend, dbt models, infrastructure | Initial code and documentation drafts |
+| Quality assurance | Test execution, demo scripts, production validation | Debugging hypotheses |

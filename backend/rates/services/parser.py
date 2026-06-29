@@ -1,4 +1,21 @@
-"""Parse and normalize rate records from parquet rows, webhooks, and HTTP scrape payloads."""
+"""Parse and normalize rate records from parquet rows, webhooks, and HTTP scrape payloads.
+
+Used on the online ingest path (webhook + HTTP scrape). Bulk parquet seed skips this
+module per row — dbt parses raw JSON in SQL instead.
+
+Example — webhook record flowing through this module:
+
+    record = {
+        "provider": "Chase",
+        "rate_type": "30yr_fixed_mortgage",
+        "rate_value": "6.75",
+        "effective_date": "2025-06-01",
+        "ingestion_ts": "2025-06-01T12:00:00Z",
+        "raw_response_id": "webhook-001",
+    }
+    parsed = parse_rate_record(record)
+    # → ParsedRate(parse_status="success", provider_name="Chase", rate_value=Decimal("6.75"), ...)
+"""
 
 import math
 import re
@@ -13,7 +30,9 @@ from django.utils.dateparse import parse_date, parse_datetime
 from rates.services.exceptions import InvalidIngestPayloadError
 from rates.services.parsed_rate import ParsedRate
 
-# Canonical display names for known seed-data casing variants.
+# Canonical display names for the 10 seed banks with casing variants.
+# Unknown providers still work — normalize_provider_name() falls back to .title().
+# Examples: "hsbc" → "HSBC"  |  "barclays" (not listed) → "Barclays"
 PROVIDER_ALIASES = {
     "hsbc": "HSBC",
     "chase": "Chase",
@@ -29,7 +48,13 @@ PROVIDER_ALIASES = {
 
 
 def normalize_provider_name(name: str) -> str:
-    """Map casing variants to a single display name (e.g. 'hsbc' → 'HSBC')."""
+    """Map casing variants to a single display name for API filters and ParsedRate.
+
+    Examples:
+        normalize_provider_name("hsbc")    → "HSBC"      (alias)
+        normalize_provider_name("  Chase") → "Chase"     (alias)
+        normalize_provider_name("barclays") → "Barclays" (fallback .title())
+    """
     key = re.sub(r"\s+", " ", name.strip().lower())
     return PROVIDER_ALIASES.get(key, name.strip().title())
 
@@ -42,7 +67,14 @@ CURRENCY_ALIASES = {
 
 
 def normalize_currency(value: Any) -> str:
-    """Map seed-data variants ('usd', 'US Dollar') to ISO 4217 codes."""
+    """Map seed-data variants to ISO 4217 codes.
+
+    Examples:
+        normalize_currency(None)        → "USD"
+        normalize_currency("us dollar") → "USD"
+        normalize_currency("EUR")       → "EUR"
+        normalize_currency("dollars")   → "USD"  (unrecognized → default)
+    """
     if not value:
         return "USD"
     raw = str(value).strip()
@@ -56,7 +88,16 @@ def normalize_currency(value: Any) -> str:
 
 
 def validate_rate_value(value: Any) -> Decimal | None:
-    """Return Decimal for positive values; None for null, zero, or invalid input."""
+    """Return Decimal for positive values; None for null, zero, or invalid input.
+
+    Examples:
+        validate_rate_value("6.75")  → Decimal("6.75")
+        validate_rate_value(6.75)    → Decimal("6.75")
+        validate_rate_value(None)    → None
+        validate_rate_value("0")     → None
+        validate_rate_value("-1")    → None
+        validate_rate_value("abc")   → None
+    """
     if value is None:
         return None
     try:
@@ -69,7 +110,13 @@ def validate_rate_value(value: Any) -> Decimal | None:
 
 
 def json_safe_value(value: Any) -> Any:
-    """Ensure values stored in RawResponse.raw_body are JSON-serializable."""
+    """Ensure values stored in RawResponse.raw_body are JSON-serializable.
+
+    Examples:
+        json_safe_value(Decimal("6.75"))              → "6.75"
+        json_safe_value(datetime(2025, 6, 1, 12, 0))  → "2025-06-01T12:00:00"
+        json_safe_value(float("nan"))                   → None
+    """
     if isinstance(value, Decimal):
         return str(value) if value.is_finite() else None
     if isinstance(value, float) and math.isnan(value):
@@ -80,7 +127,14 @@ def json_safe_value(value: Any) -> Any:
 
 
 def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
-    """Snapshot of source fields stored on RawResponse for replay/debugging."""
+    """Snapshot of source fields stored on RawResponse for replay/debugging.
+
+    Example — input record → stored raw_body JSONB:
+
+        record = {"provider": "Chase", "rate_value": Decimal("6.75"), ...}
+        build_raw_body(record)
+        → {"provider": "Chase", "rate_value": "6.75", "effective_date": "2025-06-01", ...}
+    """
     return {
         "provider": record.get("provider"),
         "rate_type": record.get("rate_type"),
@@ -93,7 +147,34 @@ def build_raw_body(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_rate_record(record: dict[str, Any]) -> ParsedRate | None:
-    """Core parser — webhook validation and HTTP scrape adapter."""
+    """Core parser — webhook validation and HTTP scrape adapter.
+
+    Returns None when provider is missing.
+
+    parse_status outcomes:
+        "success" — all required fields + valid rate_value
+        "partial" — required fields present but rate_value null/invalid (stored, excluded from marts)
+        "failed"  — missing rate_type, effective_date, or ingestion_ts
+
+    Example — success:
+        parse_rate_record({
+            "provider": "Chase",
+            "rate_type": "30yr_fixed_mortgage",
+            "rate_value": "6.75",
+            "effective_date": "2025-06-01",
+            "ingestion_ts": "2025-06-01T12:00:00Z",
+            "raw_response_id": "webhook-001",
+        })
+        → ParsedRate(parse_status="success", external_id="webhook-001", ...)
+
+    Example — partial (bad rate):
+        parse_rate_record({..., "rate_value": None, ...})
+        → ParsedRate(parse_status="partial", error_message="Invalid or missing rate_value")
+
+    Example — failed (missing fields):
+        parse_rate_record({"provider": "Chase", "rate_type": "30yr_fixed_mortgage"})
+        → ParsedRate(parse_status="failed", error_message="Missing required fields: ...")
+    """
     provider = record.get("provider")
     if not provider:
         return None
@@ -147,6 +228,7 @@ def parse_rate_record(record: dict[str, Any]) -> ParsedRate | None:
 
 
 def _record_from_ingest(validated: dict[str, Any]) -> dict[str, Any]:
+    """Map DRF serializer output to the flat dict shape expected by parse_rate_record()."""
     return {
         "provider": validated.get("provider"),
         "rate_type": validated.get("rate_type"),
@@ -160,7 +242,18 @@ def _record_from_ingest(validated: dict[str, Any]) -> dict[str, Any]:
 
 
 def parsed_from_ingest(validated: dict[str, Any]) -> ParsedRate:
-    """Build parsed record from DRF-validated webhook payload."""
+    """Build parsed record from DRF-validated webhook payload.
+
+    Raises InvalidIngestPayloadError when parse_status is "failed" (→ HTTP 400).
+    Allows "success" and "partial" through (→ HTTP 201).
+
+    Example:
+        parsed_from_ingest({"provider": "Chase", "rate_type": ..., ...})
+        → ParsedRate(parse_status="success", ...)
+
+        parsed_from_ingest({"provider": "Chase"})  # missing fields
+        → raises InvalidIngestPayloadError
+    """
     parsed = parse_rate_record(_record_from_ingest(validated))
     if not parsed or parsed.is_failed:
         raise InvalidIngestPayloadError("Invalid ingest payload")
@@ -168,7 +261,28 @@ def parsed_from_ingest(validated: dict[str, Any]) -> ParsedRate:
 
 
 def parse_scrape_payload(payload: dict[str, Any]) -> ParsedRate | None:
-    """Parse HTTP scrape response body into a normalized rate record (Adapter pattern)."""
+    """Parse HTTP scrape response into a normalized rate record (Adapter pattern).
+
+    Unwraps scraper.fetch_rate_source() output and delegates to parse_rate_record().
+
+    Example — scraper output:
+        payload = {
+            "source_url": "https://www.chase.com/rates/30yr_fixed_mortgage",
+            "status_code": 200,
+            "body": {
+                "provider": "Chase",
+                "rate_type": "30yr_fixed_mortgage",
+                "rate_value": "6.75",
+                "effective_date": "2025-06-01",
+                "ingestion_ts": "2025-06-01T12:00:00Z",
+                "raw_response_id": "scrape-001",
+            },
+        }
+        parse_scrape_payload(payload) → ParsedRate(parse_status="success", ...)
+
+    Example — non-dict body (HTML error page, etc.):
+        parse_scrape_payload({"body": "<html>..."}) → None
+    """
     body = payload.get("body")
     if not isinstance(body, dict):
         return None
@@ -187,7 +301,17 @@ def parse_scrape_payload(payload: dict[str, Any]) -> ParsedRate | None:
 
 
 def coerce_parsed_dates(parsed: ParsedRate) -> ParsedRate | None:
-    """Normalize date fields on a parsed record to Django-compatible types."""
+    """Normalize date fields on a parsed record to Django-compatible types.
+
+    Called by RateWriter.persist_one() immediately before DB insert.
+
+    Examples:
+        effective_date "2025-06-01" (str)  → date(2025, 6, 1)
+        ingestion_ts "2025-06-01T12:00:00Z" → aware datetime (UTC)
+        naive datetime(2025, 6, 1, 12, 0) → make_aware(..., UTC)
+
+    Returns None when either date cannot be parsed (row skipped by writer).
+    """
     effective = parsed.effective_date
     if not isinstance(effective, date):
         effective = parse_date(str(effective))
@@ -195,8 +319,6 @@ def coerce_parsed_dates(parsed: ParsedRate) -> ParsedRate | None:
     if isinstance(ingestion, str):
         ingestion = parse_datetime(ingestion)
     if ingestion and timezone.is_naive(ingestion):
-        # Parquet/CSV often yields naive datetimes — e.g. datetime(2025, 6, 1, 12, 0, 0)
-        # with tzinfo=None. Django USE_TZ=True requires aware UTC before DB insert.
         ingestion = timezone.make_aware(ingestion, dt_timezone.utc)
     if not effective or not ingestion:
         return None
