@@ -36,7 +36,8 @@ export function DashboardClient() {
     ratesByProvider,
   } = useDashboard();
 
-  const showStats = !latest.loading && !filters.loading && latest.rates.length > 0;
+  const showStats =
+    !latest.loading && !filters.loading && latest.rates.length > 0;
 
   return (
     <main className={styles.main}>

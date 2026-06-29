@@ -1,54 +1,51 @@
-/** Unit tests for daily history aggregation (chart data). */
+/** Unit tests for history chart point mapping. */
 
 import { describe, expect, it } from "vitest";
 
 import { HistoryRate } from "@/interfaces/rates";
-import { aggregateHistoryByDay } from "@/lib/history";
+import { toHistoryPoints } from "@/lib/history";
 
 const rows: HistoryRate[] = [
   {
     id: 1,
     provider: "Bank of America",
     rate_type: "30yr_fixed_mortgage",
-    rate_value: "6.00",
-    effective_date: "2024-09-25",
-    ingestion_ts: "2024-09-25T00:00:00Z",
+    rate_value: "6.9858",
+    effective_date: "2026-02-28",
+    ingestion_ts: "2026-02-28T12:00:00Z",
     currency: "USD",
   },
   {
     id: 2,
     provider: "Bank of America",
     rate_type: "30yr_fixed_mortgage",
-    rate_value: "8.00",
-    effective_date: "2024-09-25",
-    ingestion_ts: "2024-09-25T01:00:00Z",
+    rate_value: "7.5597",
+    effective_date: "2026-03-01",
+    ingestion_ts: "2026-03-01T23:13:45Z",
     currency: "USD",
   },
   {
     id: 3,
     provider: "Bank of America",
     rate_type: "30yr_fixed_mortgage",
-    rate_value: "7.00",
-    effective_date: "2024-09-26",
-    ingestion_ts: "2024-09-26T00:00:00Z",
+    rate_value: null,
+    effective_date: "2026-03-02",
+    ingestion_ts: "2026-03-02T00:00:00Z",
     currency: "USD",
   },
 ];
 
-describe("aggregateHistoryByDay", () => {
-  it("averages multiple snapshots on the same effective_date", () => {
-    const points = aggregateHistoryByDay(rows);
-    expect(points).toHaveLength(2);
-    expect(points[0]).toEqual({ effective_date: "2024-09-25", rate_value: 7 });
-    expect(points[1]).toEqual({ effective_date: "2024-09-26", rate_value: 7 });
+describe("toHistoryPoints", () => {
+  it("maps deduped API rows to chart points", () => {
+    const points = toHistoryPoints(rows);
+    expect(points).toEqual([
+      { effective_date: "2026-02-28", rate_value: 6.9858 },
+      { effective_date: "2026-03-01", rate_value: 7.5597 },
+    ]);
   });
 
-  it("sorts by date ascending", () => {
-    const points = aggregateHistoryByDay([
-      rows[2],
-      rows[0],
-      rows[1],
-    ]);
-    expect(points.map((p) => p.effective_date)).toEqual(["2024-09-25", "2024-09-26"]);
+  it("sorts by effective_date ascending", () => {
+    const points = toHistoryPoints([rows[1], rows[0]]);
+    expect(points.map((p) => p.effective_date)).toEqual(["2026-02-28", "2026-03-01"]);
   });
 });

@@ -39,7 +39,8 @@ export function RateTable({
         description={
           emptyDescription ?? (
             <>
-              Load seed data to get started — run <code>make seed</code> in your terminal.
+              Load seed data to get started — run <code>make seed</code> in your
+              terminal.
             </>
           )
         }
@@ -87,7 +88,9 @@ export function RateTable({
                 <span className={styles.provider}>{rate.provider}</span>
               </td>
               <td>
-                <span className={styles.typeBadge}>{formatRateType(rate.rate_type)}</span>
+                <span className={styles.typeBadge}>
+                  {formatRateType(rate.rate_type)}
+                </span>
               </td>
               <td>
                 <span className={styles.rateValue}>

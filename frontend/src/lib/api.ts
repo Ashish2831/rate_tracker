@@ -70,7 +70,7 @@ function buildListParams(
   return params;
 }
 
-/** Fetch every page of history for charting (seed data has many snapshots per day). */
+/** Fetch every page of history for charting (API is paginated). */
 async function fetchAllRateHistory(
   provider: string,
   type: string,

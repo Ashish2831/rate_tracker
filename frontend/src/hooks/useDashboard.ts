@@ -38,8 +38,14 @@ export function useDashboard() {
   });
   const ingestedSort = useSortableRates(ingested.records);
 
-  const bestRate = useMemo(() => bestRateFromRates(latest.rates), [latest.rates]);
-  const ratesByProvider = useMemo(() => groupRatesByProvider(latest.rates), [latest.rates]);
+  const bestRate = useMemo(
+    () => bestRateFromRates(latest.rates),
+    [latest.rates],
+  );
+  const ratesByProvider = useMemo(
+    () => groupRatesByProvider(latest.rates),
+    [latest.rates],
+  );
 
   async function handleRefresh() {
     setRefreshing(true);

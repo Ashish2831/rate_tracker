@@ -41,7 +41,7 @@ export interface IngestedRatesResponse {
   results: IngestedRate[];
 }
 
-/** Chart-friendly point after filtering null rate values. */
+/** Chart-friendly point mapped from a deduped mart_rates row. */
 export interface HistoryPoint {
   effective_date: string;
   rate_value: number;
