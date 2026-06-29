@@ -2,8 +2,6 @@
 
 A production-shaped interest rate tracking application: data ingestion → PostgreSQL persistence → cached Django REST API → Next.js dashboard.
 
-Built as a senior full-stack take-home assessment for Forbes Advisor / Marketplace.
-
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) 24+ and Docker Compose v2
@@ -30,7 +28,7 @@ open http://localhost:3000
 
 The API is available at `http://localhost:8000/api/`.
 
-**Reviewer note:** The dashboard loads immediately after `docker compose up` (empty state). Run `make seed` to populate data. Total startup to dashboard: under 2 minutes.
+**Note:** The dashboard loads immediately after `docker compose up` (empty state). Run `make seed` to populate data. Total startup to dashboard: under 2 minutes.
 
 ## How to Run Locally
 
