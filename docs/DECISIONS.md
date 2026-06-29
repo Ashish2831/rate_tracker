@@ -398,8 +398,6 @@ Authorization: Bearer dev-ingest-token-change-me
 
 Validation is string equality — no expiry, no per-client identity, no scopes. Read endpoints remain `AllowAny`. Staff session login on `/api-auth/login/` is a dev-only convenience for the browsable API, not production ingest auth.
 
-**Why this is correct for the take-home:**
-
 - Satisfies “ingest requires bearer token, GET works without auth”
 - No external auth service (Auth0, Cognito, etc.)
 - Simple for one webhook caller or demo `curl`
@@ -598,8 +596,6 @@ Steady read traffic   → cache refreshed on miss; TTL resets on each set()
 ---
 
 ## Production mapping
-
-This take-home runs locally via Docker Compose. In a Forbes Advisor / Marketplace production stack, the same boundaries map as follows:
 
 | Local component | Production analogue |
 |-----------------|---------------------|
